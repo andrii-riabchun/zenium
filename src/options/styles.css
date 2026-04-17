@@ -140,6 +140,35 @@ button.secondary {
   margin-top: 16px;
 }
 
+.setting-list {
+  display: grid;
+  gap: 14px;
+  margin-top: 12px;
+}
+
+.setting-toggle {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.setting-toggle > span {
+  display: grid;
+  gap: 4px;
+}
+
+.setting-toggle small {
+  color: #afbdd4;
+  font-size: 12px;
+}
+
+.setting-toggle input {
+  width: auto;
+  min-width: 0;
+  accent-color: #5987f1;
+}
+
 .mapping-group {
   display: grid;
   gap: 8px;

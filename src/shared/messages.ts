@@ -11,7 +11,6 @@ export function isRuntimeRequest(value: unknown): value is RuntimeRequest {
 
   switch (value.type) {
     case "content/ready":
-      return typeof value.hostname === "string";
     case "worker/refetch-styles":
     case "worker/refresh-active-tab":
       return true;

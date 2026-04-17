@@ -9,7 +9,7 @@ export default defineManifest({
     48: "icons/logo_48.png",
     96: "icons/logo_96.png",
   },
-  permissions: ["activeTab", "alarms", "storage", "tabs", "webNavigation"],
+  permissions: ["alarms", "storage", "tabs", "webNavigation"],
   host_permissions: ["<all_urls>"],
   action: {
     default_popup: "popup.html",

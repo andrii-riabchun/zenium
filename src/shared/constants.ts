@@ -10,8 +10,6 @@ export const STORAGE_KEYS = {
   stylesMapping: "stylesMapping",
   userStylesMapping: "userStylesMapping",
   stylesRepositoryUrl: "stylesRepositoryUrl",
-  liveChatPosition: "liveChatPosition",
-  liveChatOpacity: "liveChatOpacity",
 } as const;
 
 export const CHROME_COMPAT_MIGRATION_VERSION = 1;
@@ -31,8 +29,6 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
   disableHover: false,
   disableFooter: false,
   disableDarkReader: false,
-  enableLogs: false,
-  welcomeShown: false,
 };
 
 export const ICONS = {

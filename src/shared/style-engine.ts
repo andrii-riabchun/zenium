@@ -1,5 +1,5 @@
 import { filterUnsupportedChromeCss, isFullyUnsupportedChromeCss } from "./css-compat";
-import { normalizeHostname } from "./settings";
+import { normalizeHostname, normalizeSitePattern } from "./settings";
 import type {
   ExtensionSnapshot,
   SiteFeatureMetadataMap,
@@ -18,7 +18,7 @@ export function mergeMappings(base: StoredMapping, user: StoredMapping): Record<
   for (const [source, targets] of Object.entries(user.mapping)) {
     const existing = new Set(merged[source] ?? []);
     for (const target of targets) {
-      existing.add(normalizeHostname(target));
+      existing.add(normalizeSitePattern(target));
     }
     merged[source] = [...existing];
   }
@@ -30,53 +30,44 @@ function getWebsiteStyles(styles: StylesPayload | null): Record<string, WebsiteF
   return styles?.website ?? {};
 }
 
+function getHostnamePatternMatchLength(hostname: string, pattern: string, allowImplicitSubdomainMatch: boolean): number {
+  const normalizedHostname = normalizeHostname(hostname);
+  const normalizedPattern = normalizeSitePattern(pattern);
+
+  if (!normalizedPattern.startsWith("+") && !normalizedPattern.startsWith("-") && normalizedHostname === normalizedPattern) {
+    return Number.MAX_SAFE_INTEGER;
+  }
+
+  if (normalizedPattern.startsWith("+")) {
+    const baseSite = normalizeHostname(normalizedPattern.slice(1));
+    return normalizedHostname === baseSite || normalizedHostname.endsWith(`.${baseSite}`) ? baseSite.length : -1;
+  }
+
+  if (normalizedPattern.startsWith("-")) {
+    const baseSite = normalizeHostname(normalizedPattern.slice(1));
+    const cachedDomain = baseSite.split(".").slice(0, -1).join(".");
+    const hostDomain = normalizedHostname.split(".").slice(0, -1).join(".");
+    return cachedDomain && cachedDomain === hostDomain ? cachedDomain.length : -1;
+  }
+
+  return allowImplicitSubdomainMatch && normalizedHostname !== normalizedPattern && normalizedHostname.endsWith(`.${normalizedPattern}`)
+    ? normalizedPattern.length
+    : -1;
+}
+
 export function getAvailableStyleKeys(snapshot: ExtensionSnapshot): string[] {
   return Object.keys(getWebsiteStyles(snapshot.styles)).sort();
 }
 
 function resolveDirectStyleKey(hostname: string, styles: Record<string, WebsiteFeatureMap>): string | null {
-  const normalizedHostname = normalizeHostname(hostname);
   let bestMatch: string | null = null;
   let bestLength = -1;
 
   for (const styleKey of Object.keys(styles)) {
-    const siteName = styleKey.replace(/\.css$/, "");
-    const normalizedSiteName = normalizeHostname(siteName);
-
-    if (normalizedHostname === normalizedSiteName) {
-      return styleKey;
-    }
-
-    if (siteName.startsWith("+")) {
-      const baseSite = normalizeHostname(siteName.slice(1));
-      if (
-        (normalizedHostname === baseSite || normalizedHostname.endsWith(`.${baseSite}`)) &&
-        baseSite.length > bestLength
-      ) {
-        bestMatch = styleKey;
-        bestLength = baseSite.length;
-      }
-      continue;
-    }
-
-    if (siteName.startsWith("-")) {
-      const baseSite = siteName.slice(1);
-      const cachedDomain = baseSite.split(".").slice(0, -1).join(".");
-      const hostDomain = normalizedHostname.split(".").slice(0, -1).join(".");
-      if (cachedDomain && cachedDomain === hostDomain && cachedDomain.length > bestLength) {
-        bestMatch = styleKey;
-        bestLength = cachedDomain.length;
-      }
-      continue;
-    }
-
-    if (
-      normalizedHostname !== normalizedSiteName &&
-      normalizedHostname.endsWith(`.${normalizedSiteName}`) &&
-      normalizedSiteName.length > bestLength
-    ) {
+    const matchLength = getHostnamePatternMatchLength(hostname, styleKey.replace(/\.css$/, ""), true);
+    if (matchLength > bestLength) {
       bestMatch = styleKey;
-      bestLength = normalizedSiteName.length;
+      bestLength = matchLength;
     }
   }
 
@@ -88,13 +79,24 @@ function resolveMappedStyleKey(
   styles: Record<string, WebsiteFeatureMap>,
   mergedMapping: Record<string, string[]>,
 ): string | null {
-  const normalizedHostname = normalizeHostname(hostname);
+  let bestMatch: string | null = null;
+  let bestLength = -1;
+
   for (const [sourceStyle, targets] of Object.entries(mergedMapping)) {
-    if (targets.includes(normalizedHostname) && styles[sourceStyle]) {
-      return sourceStyle;
+    if (!styles[sourceStyle]) {
+      continue;
+    }
+
+    for (const target of targets) {
+      const matchLength = getHostnamePatternMatchLength(hostname, target, false);
+      if (matchLength > bestLength) {
+        bestMatch = sourceStyle;
+        bestLength = matchLength;
+      }
     }
   }
-  return null;
+
+  return bestMatch;
 }
 
 export function resolveStyleKey(hostname: string, snapshot: ExtensionSnapshot): string | null {
@@ -110,7 +112,8 @@ export function resolveStyleKey(hostname: string, snapshot: ExtensionSnapshot): 
 
 export function getSiteStyleInfo(hostname: string, snapshot: ExtensionSnapshot): SiteStyleInfo {
   const normalizedHostname = normalizeHostname(hostname);
-  const styleKey = resolveStyleKey(normalizedHostname, snapshot);
+  const decision = getStyleDecision(normalizedHostname, snapshot);
+  const styleKey = decision.shouldApply ? decision.styleKey : null;
   const styles = getWebsiteStyles(snapshot.styles);
   const featureNames = styleKey && styles[styleKey] ? Object.keys(styles[styleKey]).sort() : [];
 
@@ -127,7 +130,6 @@ export function getSiteStyleInfo(hostname: string, snapshot: ExtensionSnapshot):
 export function getAutoDisabledFeatures(
   hostname: string,
   snapshot: ExtensionSnapshot,
-  siteSettings: SiteFeatureSettings,
   siteFeatureMetadata: SiteFeatureMetadataMap,
 ): string[] {
   const normalizedHostname = normalizeHostname(hostname);
@@ -279,7 +281,7 @@ export function buildCssForHostname(
   }
 
   let combinedCss = "";
-  if (styleKey && styles[styleKey]) {
+  if (decision.shouldApply && styleKey && styles[styleKey]) {
     for (const [featureName, css] of Object.entries(styles[styleKey])) {
       if (isFeatureEnabled(featureName, css, snapshot, siteSettings, decision.hasFallbackBackground)) {
         const filteredCss = filterUnsupportedChromeCss(css).css.trim();

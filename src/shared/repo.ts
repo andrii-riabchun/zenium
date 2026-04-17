@@ -1,6 +1,7 @@
 import { STORAGE_KEYS } from "./constants";
-import { getRepositoryUrl, getStoredMapping, patchGlobalSettings, setStoredMapping, setStylesPayload } from "./storage";
-import type { StoredMapping, StylesPayload } from "./types";
+import { normalizeSitePattern } from "./settings";
+import { getRepositoryUrl, patchGlobalSettings, setStoredMapping, setStylesPayload } from "./storage";
+import type { StylesPayload } from "./types";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -18,20 +19,14 @@ function sanitizeStylesPayload(payload: unknown): StylesPayload {
     ? Object.fromEntries(
         Object.entries(payload.mapping).map(([key, value]) => [
           key,
-          Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [],
+          Array.isArray(value)
+            ? [...new Set(value.filter((entry): entry is string => typeof entry === "string").map(normalizeSitePattern))].sort()
+            : [],
         ]),
       )
     : undefined;
 
   return { website, mapping };
-}
-
-function getNextStoredMapping(styles: StylesPayload, existing: StoredMapping): StoredMapping {
-  if (styles.mapping && Object.keys(styles.mapping).length > 0) {
-    return { mapping: styles.mapping };
-  }
-
-  return existing;
 }
 
 export async function refreshStylesFromRepository(): Promise<StylesPayload> {
@@ -47,12 +42,10 @@ export async function refreshStylesFromRepository(): Promise<StylesPayload> {
   }
 
   const styles = sanitizeStylesPayload(await response.json());
-  const existingMapping = await getStoredMapping(STORAGE_KEYS.stylesMapping);
-  const nextMapping = getNextStoredMapping(styles, existingMapping);
 
   await Promise.all([
     setStylesPayload(styles),
-    setStoredMapping(STORAGE_KEYS.stylesMapping, nextMapping),
+    setStoredMapping(STORAGE_KEYS.stylesMapping, { mapping: styles.mapping ?? {} }),
     patchGlobalSettings({ lastFetchedTime: Date.now() }),
   ]);
 

@@ -8,7 +8,6 @@ import {
   getSiteFeatureMetadata,
   getSiteSettings,
   getSnapshot,
-  getStringList,
   patchSiteFeatureMetadata,
   patchSiteSettings,
   patchGlobalSettings,
@@ -16,6 +15,8 @@ import {
 } from "../shared/storage";
 import { buildCssForHostname, getAutoDisabledFeatures, getStyleDecision } from "../shared/style-engine";
 import type { ContentMessage, RuntimeResponse } from "../shared/types";
+
+const iconStateByTab = new Map<number, boolean>();
 
 async function sendContentMessage(tabId: number, message: ContentMessage): Promise<void> {
   try {
@@ -25,7 +26,7 @@ async function sendContentMessage(tabId: number, message: ContentMessage): Promi
   }
 }
 
-async function migrateChromeCompatAutodisable(): Promise<void> {
+async function ensureChromeCompatMigrationVersion(): Promise<void> {
   const storedVersion = (await chrome.storage.local.get("chromeCompatMigrationVersion")).chromeCompatMigrationVersion;
   const currentVersion = typeof storedVersion === "number" ? storedVersion : 0;
   if (currentVersion >= CHROME_COMPAT_MIGRATION_VERSION) {
@@ -45,10 +46,16 @@ async function getTabUrl(tabId: number): Promise<string | undefined> {
 }
 
 async function setTabIcon(tabId: number, enabled: boolean): Promise<void> {
+  if (iconStateByTab.get(tabId) === enabled) {
+    return;
+  }
+
   await chrome.action.setIcon({
     tabId,
     path: enabled ? ICONS.on : ICONS.off,
   });
+
+  iconStateByTab.set(tabId, enabled);
 }
 
 async function updateTabStyling(tabId: number, url?: string): Promise<void> {
@@ -63,7 +70,7 @@ async function updateTabStyling(tabId: number, url?: string): Promise<void> {
   const snapshot = await getSnapshot();
   const siteSettings = await getSiteSettings(hostname);
   const siteFeatureMetadata = await getSiteFeatureMetadata(hostname);
-  const autoDisabledFeatures = getAutoDisabledFeatures(hostname, snapshot, siteSettings, siteFeatureMetadata);
+  const autoDisabledFeatures = getAutoDisabledFeatures(hostname, snapshot, siteFeatureMetadata);
   const effectiveSiteSettings = autoDisabledFeatures.length
     ? await patchSiteSettings(hostname, Object.fromEntries(autoDisabledFeatures.map((featureName) => [featureName, false])))
     : siteSettings;
@@ -163,15 +170,25 @@ async function handleCommand(command: string): Promise<void> {
     }
 
     const hostname = normalizeHostname(new URL(tab.url).hostname);
+    const settings = await getGlobalSettings();
     const nextList = await toggleHostnameInList(STORAGE_KEYS.skipThemingList, hostname);
     await updateTabStyling(tab.id, tab.url);
-    await notifyActiveTab("Site Styling", !nextList.includes(hostname));
+    await notifyActiveTab("Site Styling", settings.whitelistStyleMode ? nextList.includes(hostname) : !nextList.includes(hostname));
   }
 }
 
 async function initialize(): Promise<void> {
-  await ensureStorageDefaults();
-  await migrateChromeCompatAutodisable();
+  const snapshot = await ensureStorageDefaults();
+  await ensureChromeCompatMigrationVersion();
+
+  if (!snapshot.styles) {
+    try {
+      await refreshStylesFromRepository();
+    } catch (error) {
+      console.warn("Failed to bootstrap styles", error);
+    }
+  }
+
   await syncAutoUpdateAlarm();
   await refreshAllTabs();
 }
@@ -247,6 +264,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
   void updateTabStyling(activeInfo.tabId);
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  iconStateByTab.delete(tabId);
 });
 
 chrome.webNavigation.onCommitted.addListener((details) => {

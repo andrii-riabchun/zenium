@@ -12,19 +12,17 @@ import {
   setSiteSettings,
   toggleHostnameInList,
 } from "../shared/storage";
-import { getSiteStyleInfo, withFeatureMetadata } from "../shared/style-engine";
-import type {
-  GlobalSettings,
-  RuntimeResponse,
-  SiteFeatureMetadataMap,
-  SiteFeatureSettings,
-  SiteStyleInfo,
-} from "../shared/types";
+import { getSiteStyleInfo, resolveStyleKey, withFeatureMetadata } from "../shared/style-engine";
+import type { GlobalSettings, RuntimeResponse, SiteFeatureMetadataMap, SiteFeatureSettings, SiteStyleInfo } from "../shared/types";
+
+type SiteMode = "matched" | "forced" | "none";
 
 interface PopupState {
   hostname: string | null;
   settings: GlobalSettings | null;
   skipThemingList: string[];
+  skipForceThemingList: string[];
+  siteMode: SiteMode;
   siteStyleInfo: SiteStyleInfo | null;
   siteSettings: SiteFeatureSettings;
   siteFeatureMetadata: SiteFeatureMetadataMap;
@@ -42,11 +40,21 @@ async function getActiveHostname(): Promise<string | null> {
   return normalizeHostname(new URL(tab.url).hostname);
 }
 
+function formatLastFetchedTime(timestamp?: number): string | null {
+  if (typeof timestamp !== "number") {
+    return null;
+  }
+
+  return new Date(timestamp).toLocaleString();
+}
+
 export function App() {
   const [state, setState] = useState<PopupState>({
     hostname: null,
     settings: null,
     skipThemingList: [],
+    skipForceThemingList: [],
+    siteMode: "none",
     siteStyleInfo: null,
     siteSettings: {},
     siteFeatureMetadata: {},
@@ -58,22 +66,25 @@ export function App() {
     let cancelled = false;
 
     async function load(): Promise<void> {
-      const [hostname, settings, skipThemingList, snapshot] = await Promise.all([
+      const [hostname, settings, skipThemingList, skipForceThemingList, snapshot] = await Promise.all([
         getActiveHostname(),
         getGlobalSettings(),
         getStringList(STORAGE_KEYS.skipThemingList),
+        getStringList(STORAGE_KEYS.skipForceThemingList),
         getSnapshot(),
       ]);
 
       const [siteSettings, siteFeatureMetadata] = hostname
         ? await Promise.all([getSiteSettings(hostname), getSiteFeatureMetadata(hostname)])
         : [{}, {}];
+      const matchedStyleKey = hostname ? resolveStyleKey(hostname, snapshot) : null;
+      const siteMode: SiteMode = hostname ? (matchedStyleKey ? "matched" : settings.forceStyling ? "forced" : "none") : "none";
       const siteStyleInfo = hostname
         ? withFeatureMetadata(getSiteStyleInfo(hostname, snapshot), siteFeatureMetadata)
         : null;
 
       if (!cancelled) {
-        setState({ hostname, settings, skipThemingList, siteStyleInfo, siteSettings, siteFeatureMetadata });
+        setState({ hostname, settings, skipThemingList, skipForceThemingList, siteMode, siteStyleInfo, siteSettings, siteFeatureMetadata });
         setStatus(hostname ? "Ready" : "Open any website to use controls.");
       }
     }
@@ -96,9 +107,30 @@ export function App() {
       return false;
     }
 
+    if (state.siteMode === "forced") {
+      const listed = state.skipForceThemingList.includes(state.hostname);
+      return state.settings.whitelistMode ? listed : !listed;
+    }
+
     const listed = state.skipThemingList.includes(state.hostname);
     return state.settings.whitelistStyleMode ? listed : !listed;
-  }, [state.hostname, state.settings, state.skipThemingList]);
+  }, [state.hostname, state.settings, state.siteMode, state.skipForceThemingList, state.skipThemingList]);
+
+  const siteToggleLabel = useMemo(() => {
+    if (!state.settings) {
+      return "Site styling";
+    }
+
+    if (state.siteMode === "forced") {
+      return state.settings.whitelistMode ? "Enable force styling on this site" : "Disable force styling on this site";
+    }
+
+    if (state.siteMode === "matched") {
+      return state.settings.whitelistStyleMode ? "Enable styling on this site" : "Disable styling on this site";
+    }
+
+    return "Styling unavailable on this site";
+  }, [state.settings, state.siteMode]);
 
   async function updateSettings(patch: Partial<GlobalSettings>): Promise<void> {
     if (!state.settings) {
@@ -115,13 +147,18 @@ export function App() {
   }
 
   async function toggleSiteStyling(): Promise<void> {
-    if (!state.hostname) {
+    if (!state.hostname || state.siteMode === "none") {
       return;
     }
 
-    const nextList = await toggleHostnameInList(STORAGE_KEYS.skipThemingList, state.hostname);
+    const targetKey = state.siteMode === "forced" ? STORAGE_KEYS.skipForceThemingList : STORAGE_KEYS.skipThemingList;
+    const nextList = await toggleHostnameInList(targetKey, state.hostname);
     await sendMessage({ type: "worker/refresh-active-tab" });
-    setState((current) => ({ ...current, skipThemingList: nextList }));
+    setState((current) => ({
+      ...current,
+      skipThemingList: targetKey === STORAGE_KEYS.skipThemingList ? nextList : current.skipThemingList,
+      skipForceThemingList: targetKey === STORAGE_KEYS.skipForceThemingList ? nextList : current.skipForceThemingList,
+    }));
   }
 
   async function toggleFeature(featureName: string, checked: boolean): Promise<void> {
@@ -185,9 +222,9 @@ export function App() {
           onChange={(checked) => void updateSettings({ enableStyling: checked })}
         />
         <Toggle
-          label={state.settings?.whitelistStyleMode ? "Enable styling on this site" : "Disable styling on this site"}
+          label={siteToggleLabel}
           checked={siteStylingEnabled}
-          disabled={!state.hostname || !state.settings}
+          disabled={!state.hostname || !state.settings || state.siteMode === "none"}
           onChange={() => void toggleSiteStyling()}
         />
         <Toggle
@@ -207,7 +244,7 @@ export function App() {
       {state.siteStyleInfo?.features.length ? (
         <section className="panel toggles">
           <div className="row stack">
-            <span className="label">Matched style</span>
+            <span className="label">Effective style</span>
             <strong className="hostname">{state.siteStyleInfo.styleKey}</strong>
           </div>
           {state.siteStyleInfo.features.map((feature) => (
@@ -232,7 +269,10 @@ export function App() {
         </button>
       </section>
 
-      <footer className="status">{status}</footer>
+      <footer className="status">
+        <div>{status}</div>
+        {state.settings?.lastFetchedTime ? <div className="status-meta">Updated {formatLastFetchedTime(state.settings.lastFetchedTime)}</div> : null}
+      </footer>
     </main>
   );
 }

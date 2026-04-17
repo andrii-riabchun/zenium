@@ -1,9 +1,8 @@
 import {
   DEFAULT_REPOSITORY_URL,
-  DEFAULT_SETTINGS,
   STORAGE_KEYS,
 } from "./constants";
-import { normalizeHostname, withDefaultSettings } from "./settings";
+import { normalizeHostname, normalizeSitePattern, withDefaultSettings } from "./settings";
 import type {
   ExtensionSnapshot,
   GlobalSettings,
@@ -19,7 +18,20 @@ function ensureMapping(value: unknown): StoredMapping {
   }
 
   const mapping = (value as StoredMapping).mapping;
-  return { mapping: mapping ?? {} };
+  if (!mapping || typeof mapping !== "object") {
+    return { mapping: {} };
+  }
+
+  return {
+    mapping: Object.fromEntries(
+      Object.entries(mapping).map(([source, targets]) => [
+        source,
+        Array.isArray(targets)
+          ? [...new Set(targets.filter((target): target is string => typeof target === "string").map(normalizeSitePattern))].sort()
+          : [],
+      ]),
+    ),
+  };
 }
 
 export function getSiteStorageKey(hostname: string): string {
@@ -140,7 +152,7 @@ export async function setStoredMapping(key: string, mapping: StoredMapping): Pro
 
 export async function addUserStyleMapping(sourceStyle: string, targetSite: string): Promise<StoredMapping> {
   const current = await getStoredMapping(STORAGE_KEYS.userStylesMapping);
-  const normalizedTarget = normalizeHostname(targetSite);
+  const normalizedTarget = normalizeSitePattern(targetSite);
   const nextTargets = new Set(current.mapping[sourceStyle] ?? []);
   nextTargets.add(normalizedTarget);
 
@@ -157,7 +169,7 @@ export async function addUserStyleMapping(sourceStyle: string, targetSite: strin
 
 export async function removeUserStyleMapping(sourceStyle: string, targetSite: string): Promise<StoredMapping> {
   const current = await getStoredMapping(STORAGE_KEYS.userStylesMapping);
-  const normalizedTarget = normalizeHostname(targetSite);
+  const normalizedTarget = normalizeSitePattern(targetSite);
   const nextTargets = (current.mapping[sourceStyle] ?? []).filter((entry) => entry !== normalizedTarget);
   const nextMapping = { ...current.mapping };
 
@@ -223,16 +235,4 @@ export async function getSnapshot(): Promise<ExtensionSnapshot> {
     ...snapshot,
     settings: withDefaultSettings(snapshot.settings),
   };
-}
-
-export async function resetToDefaults(): Promise<void> {
-  await chrome.storage.local.set({
-    [STORAGE_KEYS.settings]: DEFAULT_SETTINGS,
-    [STORAGE_KEYS.skipThemingList]: [],
-    [STORAGE_KEYS.skipForceThemingList]: [],
-    [STORAGE_KEYS.fallbackBackgroundList]: [],
-    [STORAGE_KEYS.stylesMapping]: { mapping: {} },
-    [STORAGE_KEYS.userStylesMapping]: { mapping: {} },
-    [STORAGE_KEYS.stylesRepositoryUrl]: DEFAULT_REPOSITORY_URL,
-  });
 }

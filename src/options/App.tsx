@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useState } from "react";
 
 import { DEFAULT_REPOSITORY_URL, STORAGE_KEYS } from "../shared/constants";
+import { normalizeSitePattern } from "../shared/settings";
 import {
   addUserStyleMapping,
   getGlobalSettings,
@@ -44,6 +45,10 @@ async function loadState(): Promise<OptionsState> {
     userStylesMapping: snapshot.userStylesMapping,
     availableStyleKeys: getAvailableStyleKeys(snapshot),
   };
+}
+
+function formatLastFetchedTime(timestamp?: number): string {
+  return typeof timestamp === "number" ? new Date(timestamp).toLocaleString() : "Never";
 }
 
 export function App() {
@@ -110,6 +115,17 @@ export function App() {
     setState(await loadState());
   }
 
+  async function updateSettings(patch: Partial<GlobalSettings>): Promise<void> {
+    if (!state?.settings) {
+      return;
+    }
+
+    const next = { ...state.settings, ...patch };
+    await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
+    setState((current) => (current ? { ...current, settings: next } : current));
+    setStatus("Settings saved.");
+  }
+
   if (!state) {
     return <main className="options-root">Loading...</main>;
   }
@@ -143,6 +159,48 @@ export function App() {
       </section>
 
       <section className="card">
+        <h2>Advanced behavior</h2>
+        <div className="setting-list">
+          <SettingToggle
+            label="Style whitelist mode"
+            description="Only apply site-specific styles to hosts listed below."
+            checked={state.settings?.whitelistStyleMode ?? false}
+            onChange={(checked) => void updateSettings({ whitelistStyleMode: checked })}
+          />
+          <SettingToggle
+            label="Force whitelist mode"
+            description="Only apply forced fallback styling to hosts listed below."
+            checked={state.settings?.whitelistMode ?? false}
+            onChange={(checked) => void updateSettings({ whitelistMode: checked })}
+          />
+          <SettingToggle
+            label="Disable transparency features"
+            description="Turns off transparency-related style features everywhere."
+            checked={state.settings?.disableTransparency ?? false}
+            onChange={(checked) => void updateSettings({ disableTransparency: checked })}
+          />
+          <SettingToggle
+            label="Disable hover features"
+            description="Turns off hover-reveal style features everywhere."
+            checked={state.settings?.disableHover ?? false}
+            onChange={(checked) => void updateSettings({ disableHover: checked })}
+          />
+          <SettingToggle
+            label="Disable footer features"
+            description="Turns off footer-removal style features everywhere."
+            checked={state.settings?.disableFooter ?? false}
+            onChange={(checked) => void updateSettings({ disableFooter: checked })}
+          />
+          <SettingToggle
+            label="Disable Dark Reader features"
+            description="Turns off Dark Reader compatibility overrides everywhere."
+            checked={state.settings?.disableDarkReader ?? false}
+            onChange={(checked) => void updateSettings({ disableDarkReader: checked })}
+          />
+        </div>
+      </section>
+
+      <section className="card">
         <h2>Backup</h2>
         <div className="actions">
           <button onClick={() => void exportData()}>Export all data</button>
@@ -154,20 +212,28 @@ export function App() {
       </section>
 
       <EditableList
-        title="Skip styling list"
+        title={state.settings?.whitelistStyleMode ? "Style whitelist" : "Skip styling list"}
+        description={state.settings?.whitelistStyleMode ? "Hosts that should receive site-specific styles." : "Hosts that should skip site-specific styles."}
         items={state.skipThemingList}
         onChange={(items) => void updateList(STORAGE_KEYS.skipThemingList, items)}
       />
       <EditableList
-        title="Force styling list"
+        title={state.settings?.whitelistMode ? "Force whitelist" : "Force styling skip list"}
+        description={state.settings?.whitelistMode ? "Hosts that should receive forced fallback styling." : "Hosts that should skip forced fallback styling."}
         items={state.skipForceThemingList}
         onChange={(items) => void updateList(STORAGE_KEYS.skipForceThemingList, items)}
       />
       <EditableList
         title="Fallback background list"
+        description="Hosts that should always keep a plain page background fallback."
         items={state.fallbackBackgroundList}
         onChange={(items) => void updateList(STORAGE_KEYS.fallbackBackgroundList, items)}
       />
+
+      <section className="card">
+        <h2>Status</h2>
+        <p className="muted">Last fetched: {formatLastFetchedTime(state.settings?.lastFetchedTime)}</p>
+      </section>
 
       <MappingsCard
         availableStyleKeys={state.availableStyleKeys}
@@ -189,16 +255,18 @@ export function App() {
 
 interface EditableListProps {
   title: string;
+  description?: string;
   items: string[];
   onChange: (items: string[]) => void;
 }
 
-function EditableList({ title, items, onChange }: EditableListProps) {
+function EditableList({ title, description, items, onChange }: EditableListProps) {
   const [draft, setDraft] = useState("");
 
   return (
     <section className="card">
       <h2>{title}</h2>
+      {description ? <p className="muted">{description}</p> : null}
       <div className="actions row">
         <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="example.com" />
         <button
@@ -245,6 +313,7 @@ function MappingsCard({ availableStyleKeys, mapping, onAdd, onRemove }: Mappings
   return (
     <section className="card">
       <h2>User style mappings</h2>
+      <p className="muted">Targets support exact hosts plus `+domain.tld` and `-domain.tld` patterns.</p>
       <div className="actions row wrap">
         <select value={sourceStyle} onChange={(event) => setSourceStyle(event.target.value)}>
           <option value="">Select style</option>
@@ -254,7 +323,11 @@ function MappingsCard({ availableStyleKeys, mapping, onAdd, onRemove }: Mappings
             </option>
           ))}
         </select>
-        <input value={targetSite} onChange={(event) => setTargetSite(event.target.value)} placeholder="target.example.com" />
+        <input
+          value={targetSite}
+          onChange={(event) => setTargetSite(normalizeSitePattern(event.target.value))}
+          placeholder="target.example.com or -domain.tld"
+        />
         <button
           onClick={() => {
             if (!sourceStyle || !targetSite.trim()) {
@@ -283,5 +356,24 @@ function MappingsCard({ availableStyleKeys, mapping, onAdd, onRemove }: Mappings
         ))}
       </div>
     </section>
+  );
+}
+
+interface SettingToggleProps {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+function SettingToggle({ label, description, checked, onChange }: SettingToggleProps) {
+  return (
+    <label className="setting-toggle">
+      <span>
+        <strong>{label}</strong>
+        <small>{description}</small>
+      </span>
+      <input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />
+    </label>
   );
 }

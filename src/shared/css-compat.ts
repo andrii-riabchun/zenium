@@ -12,7 +12,6 @@ const FULLY_TRANSPARENT_BG_RE =
   /(?:^|;)\s*(?:background-color\s*:\s*(?:transparent|#00000000|rgba?\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0(?:\.0+)?\s*\))|background\s*:\s*(?:none|transparent|#00000000)|background-image\s*:\s*none)\s*!?important?/i;
 const TRANSPARENT_BG_VAR_RE =
   /(?:^|;)\s*--[\w-]*(?:bg|background|surface|canvas|wash|overlay)[\w-]*\s*:\s*(?:transparent|#00000000|rgba?\([^;)]*,\s*0(?:\.0+)?\s*\))\s*!?important?/i;
-const RESET_DECORATION_RE = /(?:^|;)\s*(?:border\s*:\s*none|box-shadow\s*:\s*none)\s*!?important?/i;
 const BACKDROP_GLASS_RE = /(?:^|;)\s*backdrop-filter\s*:\s*(?!none\b)[^;]+/i;
 const SEMI_TRANSPARENT_BG_RE =
   /(?:^|;)\s*(?:background|background-color)\s*:\s*(?:rgba?\([^;)]*,\s*(?:0?\.\d+|1|var\([^)]+\))\s*\)|hsla?\([^;)]*,\s*(?:0?\.\d+|1)\s*\)|#[0-9a-f]{4}\b|#[0-9a-f]{8}\b|light-dark\(|color-mix\(|var\(--backdrop-bg\))/i;
@@ -220,7 +219,6 @@ function shouldDropSelector(selector: string, declarations: string): boolean {
   const hasTransparentVars = TRANSPARENT_BG_VAR_RE.test(declarations);
   const hasBackdropGlass = BACKDROP_GLASS_RE.test(declarations);
   const hasSemiTransparentBg = SEMI_TRANSPARENT_BG_RE.test(declarations);
-  const hasDecorationReset = RESET_DECORATION_RE.test(declarations);
 
   if (hasBackdropGlass && hasSemiTransparentBg) {
     return false;

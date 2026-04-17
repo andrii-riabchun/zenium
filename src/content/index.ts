@@ -100,5 +100,4 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
 void chrome.runtime.sendMessage({
   type: "content/ready",
-  hostname: window.location.hostname,
 });
