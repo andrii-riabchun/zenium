@@ -173,7 +173,7 @@ export function App() {
       <section className="panel">
         <div className="row stack">
           <span className="label">Current site</span>
-          <strong className="hostname">{state.hostname ?? "No supported page"}</strong>
+          <strong className="hostname">{state.hostname ?? "Page not supported"}</strong>
         </div>
       </section>
 

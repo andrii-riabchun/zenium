@@ -127,11 +127,13 @@ export function App() {
 
       <section className="card">
         <h2>Repository</h2>
-        <input
-          value={state.repositoryUrl}
-          onChange={(event) => setState({ ...state, repositoryUrl: event.target.value })}
-          placeholder={DEFAULT_REPOSITORY_URL}
-        />
+        <div className="actions">
+          <input
+            value={state.repositoryUrl}
+            onChange={(event) => setState({ ...state, repositoryUrl: event.target.value })}
+            placeholder={DEFAULT_REPOSITORY_URL}
+          />
+        </div>
         <div className="actions">
           <button onClick={() => void saveRepositoryUrl()}>Save URL</button>
           <button className="secondary" onClick={() => void resetRepository()}>
