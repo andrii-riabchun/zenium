@@ -119,7 +119,8 @@ export function App() {
       <header className="header">
         <div>
           <p className="eyebrow">Zenium</p>
-          <h1>Advanced Settings</h1>
+          <h1>Settings</h1>
+          <p className="subtitle">Cleaner, content-focused website styling for Chrome, inspired by Zen Internet.</p>
         </div>
         <p className="status">{status}</p>
       </header>

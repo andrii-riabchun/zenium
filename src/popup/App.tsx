@@ -168,8 +168,6 @@ export function App() {
     <main className="popup-root">
       <header className="hero">
         <p className="eyebrow">Zenium</p>
-        <h1>Chrome Reimplementation</h1>
-        <p className="subtitle">Typed MV3 core, fresh architecture, original untouched.</p>
       </header>
 
       <section className="panel">

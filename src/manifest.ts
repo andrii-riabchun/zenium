@@ -4,7 +4,7 @@ export default defineManifest({
   manifest_version: 3,
   name: "Zenium",
   version: "0.1.0",
-  description: "A Chrome MV3 reimplementation of Zen Internet in TypeScript.",
+  description: "Zenium brings cleaner, content-focused website styling to Chrome, inspired by Zen Internet.",
   icons: {
     48: "icons/logo_48.png",
     96: "icons/logo_96.png",
@@ -54,7 +54,7 @@ export default defineManifest({
       suggested_key: {
         default: "Alt+Shift+O",
       },
-      description: "Toggle transparency-related styles",
+      description: "Toggle background effect styling",
     },
   },
 });

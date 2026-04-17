@@ -152,7 +152,7 @@ async function handleCommand(command: string): Promise<void> {
     const settings = await getGlobalSettings();
     const next = await patchGlobalSettings({ disableTransparency: !settings.disableTransparency });
     await refreshAllTabs();
-    await notifyActiveTab("Transparency", !next.disableTransparency);
+    await notifyActiveTab("Background Effects", !next.disableTransparency);
     return;
   }
 

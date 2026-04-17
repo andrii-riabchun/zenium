@@ -47,7 +47,7 @@ function showToast(text: string, isEnabled: boolean): void {
     zIndex: "2147483647",
     padding: "12px 16px",
     borderRadius: "14px",
-    background: isEnabled ? "rgba(249, 135, 100, 0.95)" : "rgba(31, 41, 55, 0.92)",
+    background: isEnabled ? "rgba(89, 135, 241, 0.95)" : "rgba(31, 41, 55, 0.92)",
     color: "#fff",
     fontFamily: "Inter, Arial, sans-serif",
     fontSize: "14px",
