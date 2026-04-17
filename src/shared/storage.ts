@@ -174,7 +174,8 @@ export async function removeUserStyleMapping(sourceStyle: string, targetSite: st
 
 export async function getRepositoryUrl(): Promise<string> {
   const result = await chrome.storage.local.get(STORAGE_KEYS.stylesRepositoryUrl);
-  return result[STORAGE_KEYS.stylesRepositoryUrl] || DEFAULT_REPOSITORY_URL;
+  const repositoryUrl = result[STORAGE_KEYS.stylesRepositoryUrl];
+  return typeof repositoryUrl === "string" && repositoryUrl ? repositoryUrl : DEFAULT_REPOSITORY_URL;
 }
 
 export async function setRepositoryUrl(url: string): Promise<void> {

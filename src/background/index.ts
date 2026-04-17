@@ -26,7 +26,8 @@ async function sendContentMessage(tabId: number, message: ContentMessage): Promi
 }
 
 async function migrateChromeCompatAutodisable(): Promise<void> {
-  const currentVersion = (await chrome.storage.local.get("chromeCompatMigrationVersion")).chromeCompatMigrationVersion ?? 0;
+  const storedVersion = (await chrome.storage.local.get("chromeCompatMigrationVersion")).chromeCompatMigrationVersion;
+  const currentVersion = typeof storedVersion === "number" ? storedVersion : 0;
   if (currentVersion >= CHROME_COMPAT_MIGRATION_VERSION) {
     return;
   }
