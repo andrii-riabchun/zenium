@@ -37,24 +37,4 @@ export default defineManifest({
       matches: ["<all_urls>"],
     },
   ],
-  commands: {
-    "toggle-current-site": {
-      suggested_key: {
-        default: "Alt+Shift+U",
-      },
-      description: "Toggle styling for the current website",
-    },
-    "toggle-global-styling": {
-      suggested_key: {
-        default: "Alt+Shift+G",
-      },
-      description: "Toggle global styling",
-    },
-    "toggle-global-transparency": {
-      suggested_key: {
-        default: "Alt+Shift+O",
-      },
-      description: "Toggle background effect styling",
-    },
-  },
 });

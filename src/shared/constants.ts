@@ -3,12 +3,8 @@ import type { GlobalSettings } from "./types";
 export const STORAGE_KEYS = {
   settings: "transparentZenSettings",
   settingsMeta: "transparentZenSettingsMeta",
-  skipThemingList: "skipThemingList",
-  skipForceThemingList: "skipForceThemingList",
-  fallbackBackgroundList: "fallbackBackgroundList",
   styles: "styles",
   stylesMapping: "stylesMapping",
-  userStylesMapping: "userStylesMapping",
   stylesRepositoryUrl: "stylesRepositoryUrl",
 } as const;
 
@@ -23,12 +19,6 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
   enableStyling: true,
   autoUpdate: true,
   forceStyling: false,
-  whitelistMode: false,
-  whitelistStyleMode: false,
-  disableTransparency: false,
-  disableHover: false,
-  disableFooter: false,
-  disableDarkReader: false,
 };
 
 export const ICONS = {

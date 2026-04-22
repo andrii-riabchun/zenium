@@ -18,12 +18,6 @@ export function withDefaultSettings(settings?: Partial<GlobalSettings>): GlobalS
     enableStyling: settings?.enableStyling ?? DEFAULT_SETTINGS.enableStyling,
     autoUpdate: settings?.autoUpdate ?? DEFAULT_SETTINGS.autoUpdate,
     forceStyling: settings?.forceStyling ?? DEFAULT_SETTINGS.forceStyling,
-    whitelistMode: settings?.whitelistMode ?? DEFAULT_SETTINGS.whitelistMode,
-    whitelistStyleMode: settings?.whitelistStyleMode ?? DEFAULT_SETTINGS.whitelistStyleMode,
-    disableTransparency: settings?.disableTransparency ?? DEFAULT_SETTINGS.disableTransparency,
-    disableHover: settings?.disableHover ?? DEFAULT_SETTINGS.disableHover,
-    disableFooter: settings?.disableFooter ?? DEFAULT_SETTINGS.disableFooter,
-    disableDarkReader: settings?.disableDarkReader ?? DEFAULT_SETTINGS.disableDarkReader,
   };
 
   if (typeof settings?.lastFetchedTime === "number") {

@@ -2,18 +2,8 @@ import { AUTO_UPDATE_ALARM, CHROME_COMPAT_MIGRATION_VERSION, ICONS, STORAGE_KEYS
 import { isRuntimeRequest } from "../shared/messages";
 import { refreshStylesFromRepository } from "../shared/repo";
 import { isHttpUrl, normalizeHostname } from "../shared/settings";
-import {
-  ensureStorageDefaults,
-  getGlobalSettings,
-  getSiteFeatureMetadata,
-  getSiteSettings,
-  getSnapshot,
-  patchSiteFeatureMetadata,
-  patchSiteSettings,
-  patchGlobalSettings,
-  toggleHostnameInList,
-} from "../shared/storage";
-import { buildCssForHostname, getAutoDisabledFeatures, getStyleDecision } from "../shared/style-engine";
+import { ensureStorageDefaults, getGlobalSettings, getSiteFeatureMetadata, getSiteSettings, getSnapshot, patchSiteFeatureMetadata, patchSiteSettings, patchGlobalSettings } from "../shared/storage";
+import { buildCssForHostname, getAutoDisabledFeatures } from "../shared/style-engine";
 import type { ContentMessage, RuntimeResponse } from "../shared/types";
 
 const iconStateByTab = new Map<number, boolean>();
@@ -89,7 +79,6 @@ async function updateTabStyling(tabId: number, url?: string): Promise<void> {
     );
   }
   const css = buildCssForHostname(hostname, snapshot, effectiveSiteSettings);
-  const decision = getStyleDecision(hostname, snapshot);
 
   if (css) {
     await sendContentMessage(tabId, { type: "content/apply-styles", css });
@@ -98,7 +87,7 @@ async function updateTabStyling(tabId: number, url?: string): Promise<void> {
   }
 
   await sendContentMessage(tabId, { type: "content/remove-styles" });
-  await setTabIcon(tabId, decision.hasFallbackBackground);
+  await setTabIcon(tabId, false);
 }
 
 async function refreshAllTabs(): Promise<void> {
@@ -118,19 +107,6 @@ async function getActiveHttpTab(): Promise<(chrome.tabs.Tab & { id: number; url:
   return tab as chrome.tabs.Tab & { id: number; url: string };
 }
 
-async function notifyActiveTab(text: string, isEnabled: boolean): Promise<void> {
-  const tab = await getActiveHttpTab();
-  if (!tab) {
-    return;
-  }
-
-  await sendContentMessage(tab.id, {
-    type: "content/show-toast",
-    text,
-    isEnabled,
-  });
-}
-
 async function syncAutoUpdateAlarm(): Promise<void> {
   const settings = await getGlobalSettings();
   if (settings.autoUpdate) {
@@ -144,37 +120,6 @@ async function syncAutoUpdateAlarm(): Promise<void> {
 async function handleRefetch(): Promise<void> {
   await refreshStylesFromRepository();
   await refreshAllTabs();
-}
-
-async function handleCommand(command: string): Promise<void> {
-  if (command === "toggle-global-styling") {
-    const settings = await getGlobalSettings();
-    const next = await patchGlobalSettings({ enableStyling: !settings.enableStyling });
-    await refreshAllTabs();
-    await notifyActiveTab("Global Styling", next.enableStyling);
-    return;
-  }
-
-  if (command === "toggle-global-transparency") {
-    const settings = await getGlobalSettings();
-    const next = await patchGlobalSettings({ disableTransparency: !settings.disableTransparency });
-    await refreshAllTabs();
-    await notifyActiveTab("Background Effects", !next.disableTransparency);
-    return;
-  }
-
-  if (command === "toggle-current-site") {
-    const tab = await getActiveHttpTab();
-    if (!tab) {
-      return;
-    }
-
-    const hostname = normalizeHostname(new URL(tab.url).hostname);
-    const settings = await getGlobalSettings();
-    const nextList = await toggleHostnameInList(STORAGE_KEYS.skipThemingList, hostname);
-    await updateTabStyling(tab.id, tab.url);
-    await notifyActiveTab("Site Styling", settings.whitelistStyleMode ? nextList.includes(hostname) : !nextList.includes(hostname));
-  }
 }
 
 async function initialize(): Promise<void> {
@@ -285,19 +230,11 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     STORAGE_KEYS.settings in changes ||
     STORAGE_KEYS.styles in changes ||
     STORAGE_KEYS.stylesMapping in changes ||
-    STORAGE_KEYS.userStylesMapping in changes ||
-    STORAGE_KEYS.skipThemingList in changes ||
-    STORAGE_KEYS.skipForceThemingList in changes ||
-    STORAGE_KEYS.fallbackBackgroundList in changes ||
     Object.keys(changes).some((key) => key.startsWith(`${STORAGE_KEYS.settings}.`));
 
   if (shouldRefresh) {
     void refreshAllTabs();
   }
-});
-
-chrome.commands.onCommand.addListener((command) => {
-  void handleCommand(command);
 });
 
 void initialize();

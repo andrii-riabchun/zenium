@@ -2,12 +2,6 @@ export interface GlobalSettings {
   enableStyling: boolean;
   autoUpdate: boolean;
   forceStyling: boolean;
-  whitelistMode: boolean;
-  whitelistStyleMode: boolean;
-  disableTransparency: boolean;
-  disableHover: boolean;
-  disableFooter: boolean;
-  disableDarkReader: boolean;
   lastFetchedTime?: number;
 }
 
@@ -33,12 +27,8 @@ export interface StoredMapping {
 
 export interface ExtensionSnapshot {
   settings: GlobalSettings;
-  skipThemingList: string[];
-  skipForceThemingList: string[];
-  fallbackBackgroundList: string[];
   styles: StylesPayload | null;
   stylesMapping: StoredMapping;
-  userStylesMapping: StoredMapping;
   repositoryUrl: string;
 }
 
@@ -55,18 +45,8 @@ export interface SiteStyleFeatureInfo {
 
 export interface StyleDecision {
   shouldApply: boolean;
-  reason:
-    | "globally_disabled"
-    | "style_whitelisted"
-    | "style_blacklisted"
-    | "style_not_whitelisted"
-    | "force_whitelisted"
-    | "force_blacklisted"
-    | "force_not_whitelisted"
-    | "fallback_background"
-    | "no_rules";
+  reason: "globally_disabled" | "style_matched" | "force_enabled" | "no_rules";
   styleKey: string | null;
-  hasFallbackBackground: boolean;
 }
 
 export type RuntimeRequest =

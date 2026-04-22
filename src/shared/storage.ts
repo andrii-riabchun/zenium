@@ -60,27 +60,6 @@ export async function patchGlobalSettings(
   return next;
 }
 
-export async function getStringList(key: string): Promise<string[]> {
-  const result = await chrome.storage.local.get(key);
-  const list = result[key];
-  return Array.isArray(list) ? list : [];
-}
-
-export async function setStringList(key: string, value: string[]): Promise<void> {
-  await chrome.storage.local.set({ [key]: [...new Set(value.map(normalizeHostname))].sort() });
-}
-
-export async function toggleHostnameInList(key: string, hostname: string): Promise<string[]> {
-  const normalized = normalizeHostname(hostname);
-  const current = await getStringList(key);
-  const exists = current.includes(normalized);
-  const next = exists
-    ? current.filter((entry) => entry !== normalized)
-    : [...current, normalized];
-  await setStringList(key, next);
-  return next;
-}
-
 export async function getSiteSettings(hostname: string): Promise<SiteFeatureSettings> {
   const key = getSiteStorageKey(hostname);
   const result = await chrome.storage.local.get(key);
@@ -150,40 +129,6 @@ export async function setStoredMapping(key: string, mapping: StoredMapping): Pro
   await chrome.storage.local.set({ [key]: mapping });
 }
 
-export async function addUserStyleMapping(sourceStyle: string, targetSite: string): Promise<StoredMapping> {
-  const current = await getStoredMapping(STORAGE_KEYS.userStylesMapping);
-  const normalizedTarget = normalizeSitePattern(targetSite);
-  const nextTargets = new Set(current.mapping[sourceStyle] ?? []);
-  nextTargets.add(normalizedTarget);
-
-  const next: StoredMapping = {
-    mapping: {
-      ...current.mapping,
-      [sourceStyle]: [...nextTargets].sort(),
-    },
-  };
-
-  await setStoredMapping(STORAGE_KEYS.userStylesMapping, next);
-  return next;
-}
-
-export async function removeUserStyleMapping(sourceStyle: string, targetSite: string): Promise<StoredMapping> {
-  const current = await getStoredMapping(STORAGE_KEYS.userStylesMapping);
-  const normalizedTarget = normalizeSitePattern(targetSite);
-  const nextTargets = (current.mapping[sourceStyle] ?? []).filter((entry) => entry !== normalizedTarget);
-  const nextMapping = { ...current.mapping };
-
-  if (nextTargets.length === 0) {
-    delete nextMapping[sourceStyle];
-  } else {
-    nextMapping[sourceStyle] = nextTargets;
-  }
-
-  const next: StoredMapping = { mapping: nextMapping };
-  await setStoredMapping(STORAGE_KEYS.userStylesMapping, next);
-  return next;
-}
-
 export async function getRepositoryUrl(): Promise<string> {
   const result = await chrome.storage.local.get(STORAGE_KEYS.stylesRepositoryUrl);
   const repositoryUrl = result[STORAGE_KEYS.stylesRepositoryUrl];
@@ -195,36 +140,24 @@ export async function setRepositoryUrl(url: string): Promise<void> {
 }
 
 export async function ensureStorageDefaults(): Promise<ExtensionSnapshot> {
-  const [settings, skipThemingList, skipForceThemingList, fallbackBackgroundList, styles, stylesMapping, userStylesMapping, repositoryUrl] =
+  const [settings, styles, stylesMapping, repositoryUrl] =
     await Promise.all([
       getGlobalSettings(),
-      getStringList(STORAGE_KEYS.skipThemingList),
-      getStringList(STORAGE_KEYS.skipForceThemingList),
-      getStringList(STORAGE_KEYS.fallbackBackgroundList),
       getStylesPayload(),
       getStoredMapping(STORAGE_KEYS.stylesMapping),
-      getStoredMapping(STORAGE_KEYS.userStylesMapping),
       getRepositoryUrl(),
     ]);
 
   await chrome.storage.local.set({
     [STORAGE_KEYS.settings]: settings,
-    [STORAGE_KEYS.skipThemingList]: skipThemingList,
-    [STORAGE_KEYS.skipForceThemingList]: skipForceThemingList,
-    [STORAGE_KEYS.fallbackBackgroundList]: fallbackBackgroundList,
     [STORAGE_KEYS.stylesMapping]: stylesMapping,
-    [STORAGE_KEYS.userStylesMapping]: userStylesMapping,
     [STORAGE_KEYS.stylesRepositoryUrl]: repositoryUrl,
   });
 
   return {
     settings,
-    skipThemingList,
-    skipForceThemingList,
-    fallbackBackgroundList,
     styles,
     stylesMapping,
-    userStylesMapping,
     repositoryUrl,
   };
 }

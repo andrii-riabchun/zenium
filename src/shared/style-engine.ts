@@ -6,25 +6,10 @@ import type {
   SiteFeatureSettings,
   SiteStyleFeatureInfo,
   SiteStyleInfo,
-  StoredMapping,
   StyleDecision,
   StylesPayload,
   WebsiteFeatureMap,
 } from "./types";
-
-export function mergeMappings(base: StoredMapping, user: StoredMapping): Record<string, string[]> {
-  const merged: Record<string, string[]> = { ...base.mapping };
-
-  for (const [source, targets] of Object.entries(user.mapping)) {
-    const existing = new Set(merged[source] ?? []);
-    for (const target of targets) {
-      existing.add(normalizeSitePattern(target));
-    }
-    merged[source] = [...existing];
-  }
-
-  return merged;
-}
 
 function getWebsiteStyles(styles: StylesPayload | null): Record<string, WebsiteFeatureMap> {
   return styles?.website ?? {};
@@ -106,8 +91,7 @@ export function resolveStyleKey(hostname: string, snapshot: ExtensionSnapshot): 
     return directMatch;
   }
 
-  const mergedMapping = mergeMappings(snapshot.stylesMapping, snapshot.userStylesMapping);
-  return resolveMappedStyleKey(hostname, styles, mergedMapping);
+  return resolveMappedStyleKey(hostname, styles, snapshot.stylesMapping.mapping);
 }
 
 export function getSiteStyleInfo(hostname: string, snapshot: ExtensionSnapshot): SiteStyleInfo {
@@ -170,74 +154,45 @@ export function withFeatureMetadata(
 }
 
 export function getStyleDecision(hostname: string, snapshot: ExtensionSnapshot): StyleDecision {
-  const normalizedHostname = normalizeHostname(hostname);
-  const styleKey = resolveStyleKey(normalizedHostname, snapshot);
-  const hasFallbackBackground = snapshot.fallbackBackgroundList.includes(normalizedHostname);
+  const styleKey = resolveStyleKey(hostname, snapshot);
+  const hasForcedStyle = Boolean(snapshot.settings.forceStyling && snapshot.styles?.website?.["example.com.css"]);
 
   if (!snapshot.settings.enableStyling) {
     return {
       shouldApply: false,
-      reason: hasFallbackBackground ? "fallback_background" : "globally_disabled",
+      reason: "globally_disabled",
       styleKey,
-      hasFallbackBackground,
     };
   }
 
   if (styleKey) {
-    const listed = snapshot.skipThemingList.includes(normalizedHostname);
-    if (snapshot.settings.whitelistStyleMode) {
-      return {
-        shouldApply: listed || hasFallbackBackground,
-        reason: listed ? "style_whitelisted" : hasFallbackBackground ? "fallback_background" : "style_not_whitelisted",
-        styleKey,
-        hasFallbackBackground,
-      };
-    }
-
     return {
-      shouldApply: !listed || hasFallbackBackground,
-      reason: listed ? (hasFallbackBackground ? "fallback_background" : "style_blacklisted") : "style_whitelisted",
+      shouldApply: true,
+      reason: "style_matched",
       styleKey,
-      hasFallbackBackground,
     };
   }
 
-  if (snapshot.settings.forceStyling) {
-    const listed = snapshot.skipForceThemingList.includes(normalizedHostname);
-    if (snapshot.settings.whitelistMode) {
-      return {
-        shouldApply: listed || hasFallbackBackground,
-        reason: listed ? "force_whitelisted" : hasFallbackBackground ? "fallback_background" : "force_not_whitelisted",
-        styleKey: listed ? "example.com.css" : hasFallbackBackground ? "example.com.css" : null,
-        hasFallbackBackground,
-      };
-    }
-
+  if (hasForcedStyle) {
     return {
-      shouldApply: !listed || hasFallbackBackground,
-      reason: listed ? (hasFallbackBackground ? "fallback_background" : "force_blacklisted") : "force_whitelisted",
-      styleKey: !listed || hasFallbackBackground ? "example.com.css" : null,
-      hasFallbackBackground,
+      shouldApply: true,
+      reason: "force_enabled",
+      styleKey: "example.com.css",
     };
   }
 
   return {
-    shouldApply: hasFallbackBackground,
-    reason: hasFallbackBackground ? "fallback_background" : "no_rules",
+    shouldApply: false,
+    reason: "no_rules",
     styleKey: null,
-    hasFallbackBackground,
   };
 }
 
 function isFeatureEnabled(
   featureName: string,
   css: string,
-  snapshot: ExtensionSnapshot,
   siteSettings: SiteFeatureSettings,
-  hasFallbackBackground: boolean,
 ): boolean {
-  const lowerFeature = featureName.toLowerCase();
-  const lowerCss = css.toLowerCase();
   const filteredCss = filterUnsupportedChromeCss(css).css.trim();
 
   if (siteSettings[featureName] === false) {
@@ -245,22 +200,6 @@ function isFeatureEnabled(
   }
 
   if (!filteredCss) {
-    return false;
-  }
-
-  if (lowerFeature.includes("transparency") && (snapshot.settings.disableTransparency || hasFallbackBackground)) {
-    return false;
-  }
-
-  if (lowerFeature.includes("hover") && snapshot.settings.disableHover) {
-    return false;
-  }
-
-  if (lowerFeature.includes("footer") && snapshot.settings.disableFooter) {
-    return false;
-  }
-
-  if ((lowerFeature.includes("darkreader") || lowerCss.includes("darkreader")) && snapshot.settings.disableDarkReader) {
     return false;
   }
 
@@ -276,14 +215,14 @@ export function buildCssForHostname(
   const decision = getStyleDecision(hostname, snapshot);
   const styleKey = decision.styleKey;
 
-  if (!decision.shouldApply && !decision.hasFallbackBackground) {
+  if (!decision.shouldApply) {
     return null;
   }
 
   let combinedCss = "";
   if (decision.shouldApply && styleKey && styles[styleKey]) {
     for (const [featureName, css] of Object.entries(styles[styleKey])) {
-      if (isFeatureEnabled(featureName, css, snapshot, siteSettings, decision.hasFallbackBackground)) {
+      if (isFeatureEnabled(featureName, css, siteSettings)) {
         const filteredCss = filterUnsupportedChromeCss(css).css.trim();
         if (filteredCss) {
           combinedCss += `${filteredCss}\n`;
@@ -292,9 +231,5 @@ export function buildCssForHostname(
     }
   }
 
-  if (decision.hasFallbackBackground) {
-    combinedCss += "html{background-color: light-dark(#fff, #111);}\n";
-  }
-
-  return combinedCss.trim() ? combinedCss.trim() : decision.hasFallbackBackground ? combinedCss.trim() : null;
+  return combinedCss.trim() ? combinedCss.trim() : null;
 }
