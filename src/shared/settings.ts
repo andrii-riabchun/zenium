@@ -18,6 +18,7 @@ export function withDefaultSettings(settings?: Partial<GlobalSettings>): GlobalS
     enableStyling: settings?.enableStyling ?? DEFAULT_SETTINGS.enableStyling,
     autoUpdate: settings?.autoUpdate ?? DEFAULT_SETTINGS.autoUpdate,
     forceStyling: settings?.forceStyling ?? DEFAULT_SETTINGS.forceStyling,
+    backgroundColor: settings?.backgroundColor ?? DEFAULT_SETTINGS.backgroundColor,
   };
 
   if (typeof settings?.lastFetchedTime === "number") {

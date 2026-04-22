@@ -54,6 +54,21 @@ export function App() {
     setStatus("Repository URL saved.");
   }
 
+  async function saveBackgroundColor(): Promise<void> {
+    if (!state) {
+      return;
+    }
+
+    const settings = {
+      ...state.settings,
+      backgroundColor: state.settings.backgroundColor,
+    };
+
+    await chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings });
+    await chrome.runtime.sendMessage({ type: "worker/refresh-active-tab" });
+    setStatus("Background color saved.");
+  }
+
   async function resetRepository(): Promise<void> {
     await setRepositoryUrl(DEFAULT_REPOSITORY_URL);
     setState((current) => (current ? { ...current, repositoryUrl: DEFAULT_REPOSITORY_URL } : current));
@@ -65,7 +80,7 @@ export function App() {
   }
 
   return (
-    <main className="options-root">
+    <main className="options-root" style={{ ["--options-background-color" as string]: state.settings.backgroundColor }}>
       <header className="header">
         <div>
           <p className="eyebrow">Zenium</p>
@@ -74,6 +89,19 @@ export function App() {
         </div>
         <p className="status">{status}</p>
       </header>
+
+      <section className="card">
+        <h2>Background</h2>
+        <p className="muted">Transparent site backgrounds are replaced with this solid color in Chrome.</p>
+        <div className="actions row wrap">
+          <input
+            type="color"
+            value={state.settings.backgroundColor}
+            onChange={(event) => setState({ ...state, settings: { ...state.settings, backgroundColor: event.target.value } })}
+          />
+          <button onClick={() => void saveBackgroundColor()}>Save color</button>
+        </div>
+      </section>
 
       <section className="card">
         <h2>Repository</h2>

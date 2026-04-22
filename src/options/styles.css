@@ -3,13 +3,14 @@
   font-family: Inter, Arial, sans-serif;
   background: #08101a;
   color: #edf2f8;
+  --options-background-color: #08101d;
 }
 
 body {
   margin: 0;
   background:
     radial-gradient(circle at top right, rgba(89, 135, 241, 0.2), transparent 26%),
-    linear-gradient(180deg, #111d33 0%, #08101a 100%);
+    linear-gradient(180deg, color-mix(in srgb, var(--options-background-color) 88%, #1d2b45) 0%, var(--options-background-color) 100%);
 }
 
 .options-root {
@@ -81,6 +82,13 @@ input {
   background: rgba(255, 255, 255, 0.05);
   color: inherit;
   font: inherit;
+}
+
+input[type="color"] {
+  width: 56px;
+  min-width: 56px;
+  padding: 4px;
+  background: rgba(255, 255, 255, 0.08);
 }
 
 select {

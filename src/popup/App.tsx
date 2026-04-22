@@ -4,21 +4,18 @@ import { STORAGE_KEYS } from "../shared/constants";
 import { normalizeHostname } from "../shared/settings";
 import {
   getGlobalSettings,
-  getSiteFeatureMetadata,
   getSiteSettings,
   getSnapshot,
-  patchSiteFeatureMetadata,
   setSiteSettings,
 } from "../shared/storage";
-import { getSiteStyleInfo, withFeatureMetadata } from "../shared/style-engine";
-import type { GlobalSettings, RuntimeResponse, SiteFeatureMetadataMap, SiteFeatureSettings, SiteStyleInfo } from "../shared/types";
+import { getSiteStyleInfo } from "../shared/style-engine";
+import type { GlobalSettings, RuntimeResponse, SiteFeatureSettings, SiteStyleInfo } from "../shared/types";
 
 interface PopupState {
   hostname: string | null;
   settings: GlobalSettings | null;
   siteStyleInfo: SiteStyleInfo | null;
   siteSettings: SiteFeatureSettings;
-  siteFeatureMetadata: SiteFeatureMetadataMap;
 }
 
 async function sendMessage<T extends object>(message: T): Promise<RuntimeResponse> {
@@ -47,7 +44,6 @@ export function App() {
     settings: null,
     siteStyleInfo: null,
     siteSettings: {},
-    siteFeatureMetadata: {},
   });
   const [status, setStatus] = useState<string>("Loading...");
   const [isRefetching, setIsRefetching] = useState(false);
@@ -62,15 +58,11 @@ export function App() {
         getSnapshot(),
       ]);
 
-      const [siteSettings, siteFeatureMetadata] = hostname
-        ? await Promise.all([getSiteSettings(hostname), getSiteFeatureMetadata(hostname)])
-        : [{}, {}];
-      const siteStyleInfo = hostname
-        ? withFeatureMetadata(getSiteStyleInfo(hostname, snapshot), siteFeatureMetadata)
-        : null;
+      const siteSettings = hostname ? await getSiteSettings(hostname) : {};
+      const siteStyleInfo = hostname ? getSiteStyleInfo(hostname, snapshot) : null;
 
       if (!cancelled) {
-        setState({ hostname, settings, siteStyleInfo, siteSettings, siteFeatureMetadata });
+        setState({ hostname, settings, siteStyleInfo, siteSettings });
         setStatus(hostname ? "Ready" : "Open any website to use controls.");
       }
     }
@@ -113,20 +105,10 @@ export function App() {
     };
 
     await setSiteSettings(state.hostname, nextSiteSettings);
-    const nextSiteFeatureMetadata = await patchSiteFeatureMetadata(state.hostname, {
-      [featureName]: {
-        touched: true,
-        autoDisabledForChrome: false,
-      },
-    });
     await sendMessage({ type: "worker/refresh-active-tab" });
     setState((current) => ({
       ...current,
       siteSettings: nextSiteSettings,
-      siteFeatureMetadata: nextSiteFeatureMetadata,
-      siteStyleInfo: current.siteStyleInfo
-        ? withFeatureMetadata(current.siteStyleInfo, nextSiteFeatureMetadata)
-        : current.siteStyleInfo,
     }));
   }
 
@@ -186,7 +168,6 @@ export function App() {
             <Toggle
               key={feature.name}
               label={feature.name}
-              detail={feature.autoDisabledForChrome ? "With limited support" : undefined}
               checked={state.siteSettings[feature.name] !== false}
               disabled={!state.hostname}
               onChange={(checked) => void toggleFeature(feature.name, checked)}

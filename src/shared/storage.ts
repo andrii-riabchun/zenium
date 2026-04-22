@@ -6,7 +6,6 @@ import { normalizeHostname, normalizeSitePattern, withDefaultSettings } from "./
 import type {
   ExtensionSnapshot,
   GlobalSettings,
-  SiteFeatureMetadataMap,
   SiteFeatureSettings,
   StoredMapping,
   StylesPayload,
@@ -36,10 +35,6 @@ function ensureMapping(value: unknown): StoredMapping {
 
 export function getSiteStorageKey(hostname: string): string {
   return `${STORAGE_KEYS.settings}.${normalizeHostname(hostname)}`;
-}
-
-export function getSiteMetadataStorageKey(hostname: string): string {
-  return `${STORAGE_KEYS.settingsMeta}.${normalizeHostname(hostname)}`;
 }
 
 export async function getGlobalSettings(): Promise<GlobalSettings> {
@@ -79,31 +74,6 @@ export async function patchSiteSettings(
   const current = await getSiteSettings(hostname);
   const next = { ...current, ...patch };
   await setSiteSettings(hostname, next);
-  return next;
-}
-
-export async function getSiteFeatureMetadata(hostname: string): Promise<SiteFeatureMetadataMap> {
-  const key = getSiteMetadataStorageKey(hostname);
-  const result = await chrome.storage.local.get(key);
-  const value = result[key];
-  return value && typeof value === "object" ? (value as SiteFeatureMetadataMap) : {};
-}
-
-export async function setSiteFeatureMetadata(
-  hostname: string,
-  metadata: SiteFeatureMetadataMap,
-): Promise<void> {
-  const key = getSiteMetadataStorageKey(hostname);
-  await chrome.storage.local.set({ [key]: metadata });
-}
-
-export async function patchSiteFeatureMetadata(
-  hostname: string,
-  patch: SiteFeatureMetadataMap,
-): Promise<SiteFeatureMetadataMap> {
-  const current = await getSiteFeatureMetadata(hostname);
-  const next = { ...current, ...patch };
-  await setSiteFeatureMetadata(hostname, next);
   return next;
 }
 

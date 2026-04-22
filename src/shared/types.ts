@@ -2,17 +2,11 @@ export interface GlobalSettings {
   enableStyling: boolean;
   autoUpdate: boolean;
   forceStyling: boolean;
+  backgroundColor: string;
   lastFetchedTime?: number;
 }
 
 export type SiteFeatureSettings = Record<string, boolean>;
-
-export interface SiteFeatureMetadata {
-  touched: boolean;
-  autoDisabledForChrome?: boolean;
-}
-
-export type SiteFeatureMetadataMap = Record<string, SiteFeatureMetadata>;
 
 export type WebsiteFeatureMap = Record<string, string>;
 
@@ -40,7 +34,6 @@ export interface SiteStyleInfo {
 
 export interface SiteStyleFeatureInfo {
   name: string;
-  autoDisabledForChrome: boolean;
 }
 
 export interface StyleDecision {

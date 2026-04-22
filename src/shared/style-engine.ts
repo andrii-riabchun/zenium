@@ -1,10 +1,8 @@
-import { filterUnsupportedChromeCss, isFullyUnsupportedChromeCss } from "./css-compat";
+import { rewriteChromeBackgroundCss } from "./css-background";
 import { normalizeHostname, normalizeSitePattern } from "./settings";
 import type {
   ExtensionSnapshot,
-  SiteFeatureMetadataMap,
   SiteFeatureSettings,
-  SiteStyleFeatureInfo,
   SiteStyleInfo,
   StyleDecision,
   StylesPayload,
@@ -104,52 +102,7 @@ export function getSiteStyleInfo(hostname: string, snapshot: ExtensionSnapshot):
   return {
     hostname: normalizedHostname,
     styleKey,
-    features: featureNames.map((name) => ({
-      name,
-      autoDisabledForChrome: false,
-    })),
-  };
-}
-
-export function getAutoDisabledFeatures(
-  hostname: string,
-  snapshot: ExtensionSnapshot,
-  siteFeatureMetadata: SiteFeatureMetadataMap,
-): string[] {
-  const normalizedHostname = normalizeHostname(hostname);
-  const styleKey = resolveStyleKey(normalizedHostname, snapshot);
-  const styles = getWebsiteStyles(snapshot.styles);
-
-  if (!styleKey || !styles[styleKey]) {
-    return [];
-  }
-
-  const disabledFeatures: string[] = [];
-  for (const [featureName, css] of Object.entries(styles[styleKey])) {
-    if (siteFeatureMetadata[featureName]?.touched) {
-      continue;
-    }
-
-    if (isFullyUnsupportedChromeCss(css)) {
-      disabledFeatures.push(featureName);
-    }
-  }
-
-  return disabledFeatures;
-}
-
-export function withFeatureMetadata(
-  siteStyleInfo: SiteStyleInfo,
-  siteFeatureMetadata: SiteFeatureMetadataMap,
-): SiteStyleInfo {
-  const features: SiteStyleFeatureInfo[] = siteStyleInfo.features.map((feature) => ({
-    ...feature,
-    autoDisabledForChrome: siteFeatureMetadata[feature.name]?.autoDisabledForChrome === true,
-  }));
-
-  return {
-    ...siteStyleInfo,
-    features,
+    features: featureNames.map((name) => ({ name })),
   };
 }
 
@@ -190,16 +143,9 @@ export function getStyleDecision(hostname: string, snapshot: ExtensionSnapshot):
 
 function isFeatureEnabled(
   featureName: string,
-  css: string,
   siteSettings: SiteFeatureSettings,
 ): boolean {
-  const filteredCss = filterUnsupportedChromeCss(css).css.trim();
-
   if (siteSettings[featureName] === false) {
-    return false;
-  }
-
-  if (!filteredCss) {
     return false;
   }
 
@@ -222,10 +168,10 @@ export function buildCssForHostname(
   let combinedCss = "";
   if (decision.shouldApply && styleKey && styles[styleKey]) {
     for (const [featureName, css] of Object.entries(styles[styleKey])) {
-      if (isFeatureEnabled(featureName, css, siteSettings)) {
-        const filteredCss = filterUnsupportedChromeCss(css).css.trim();
-        if (filteredCss) {
-          combinedCss += `${filteredCss}\n`;
+      if (isFeatureEnabled(featureName, siteSettings)) {
+        const rewrittenCss = rewriteChromeBackgroundCss(css, snapshot.settings.backgroundColor).trim();
+        if (rewrittenCss) {
+          combinedCss += `${rewrittenCss}\n`;
         }
       }
     }

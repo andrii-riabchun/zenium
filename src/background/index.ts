@@ -1,9 +1,9 @@
-import { AUTO_UPDATE_ALARM, CHROME_COMPAT_MIGRATION_VERSION, ICONS, STORAGE_KEYS } from "../shared/constants";
+import { AUTO_UPDATE_ALARM, ICONS, STORAGE_KEYS } from "../shared/constants";
 import { isRuntimeRequest } from "../shared/messages";
 import { refreshStylesFromRepository } from "../shared/repo";
 import { isHttpUrl, normalizeHostname } from "../shared/settings";
-import { ensureStorageDefaults, getGlobalSettings, getSiteFeatureMetadata, getSiteSettings, getSnapshot, patchSiteFeatureMetadata, patchSiteSettings, patchGlobalSettings } from "../shared/storage";
-import { buildCssForHostname, getAutoDisabledFeatures } from "../shared/style-engine";
+import { ensureStorageDefaults, getGlobalSettings, getSiteSettings, getSnapshot, patchGlobalSettings } from "../shared/storage";
+import { buildCssForHostname } from "../shared/style-engine";
 import type { ContentMessage, RuntimeResponse } from "../shared/types";
 
 const iconStateByTab = new Map<number, boolean>();
@@ -14,16 +14,6 @@ async function sendContentMessage(tabId: number, message: ContentMessage): Promi
   } catch {
     // Ignore tabs without a ready content script.
   }
-}
-
-async function ensureChromeCompatMigrationVersion(): Promise<void> {
-  const storedVersion = (await chrome.storage.local.get("chromeCompatMigrationVersion")).chromeCompatMigrationVersion;
-  const currentVersion = typeof storedVersion === "number" ? storedVersion : 0;
-  if (currentVersion >= CHROME_COMPAT_MIGRATION_VERSION) {
-    return;
-  }
-
-  await chrome.storage.local.set({ chromeCompatMigrationVersion: CHROME_COMPAT_MIGRATION_VERSION });
 }
 
 async function getTabUrl(tabId: number): Promise<string | undefined> {
@@ -59,26 +49,7 @@ async function updateTabStyling(tabId: number, url?: string): Promise<void> {
   const hostname = normalizeHostname(new URL(safeUrl).hostname);
   const snapshot = await getSnapshot();
   const siteSettings = await getSiteSettings(hostname);
-  const siteFeatureMetadata = await getSiteFeatureMetadata(hostname);
-  const autoDisabledFeatures = getAutoDisabledFeatures(hostname, snapshot, siteFeatureMetadata);
-  const effectiveSiteSettings = autoDisabledFeatures.length
-    ? await patchSiteSettings(hostname, Object.fromEntries(autoDisabledFeatures.map((featureName) => [featureName, false])))
-    : siteSettings;
-  if (autoDisabledFeatures.length) {
-    await patchSiteFeatureMetadata(
-      hostname,
-      Object.fromEntries(
-        autoDisabledFeatures.map((featureName) => [
-          featureName,
-          {
-            touched: false,
-            autoDisabledForChrome: true,
-          },
-        ]),
-      ),
-    );
-  }
-  const css = buildCssForHostname(hostname, snapshot, effectiveSiteSettings);
+  const css = buildCssForHostname(hostname, snapshot, siteSettings);
 
   if (css) {
     await sendContentMessage(tabId, { type: "content/apply-styles", css });
@@ -124,7 +95,6 @@ async function handleRefetch(): Promise<void> {
 
 async function initialize(): Promise<void> {
   const snapshot = await ensureStorageDefaults();
-  await ensureChromeCompatMigrationVersion();
 
   if (!snapshot.styles) {
     try {

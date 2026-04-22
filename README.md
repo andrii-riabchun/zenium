@@ -2,6 +2,12 @@
 
 Zenium is a Chrome extension built with Vite and CRXJS.
 
+## Background color
+
+Zenium includes a `Background color` setting in the options page.
+
+When an imported site stylesheet uses transparent page or shell backgrounds, Zenium rewrites those transparent background declarations to the configured solid background color before injecting the CSS in Chrome.
+
 ## GitHub Actions
 
 The `Extension CI` workflow runs on pushes to `main`, pull requests, and manual dispatches. The build job always creates a `zenium-<version>.zip` artifact with the extension files at the archive root.
