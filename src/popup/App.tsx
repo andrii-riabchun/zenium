@@ -1,21 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
-import { STORAGE_KEYS } from "../shared/constants";
-import { normalizeHostname } from "../shared/settings";
+import { DEFAULT_SETTINGS, STORAGE_KEYS } from "../shared/constants";
+import { getColorSchemeForBackground, normalizeHostname } from "../shared/settings";
 import {
   getGlobalSettings,
   getSiteSettings,
   getSnapshot,
   setSiteSettings,
 } from "../shared/storage";
-import { getSiteStyleInfo } from "../shared/style-engine";
-import type { GlobalSettings, RuntimeResponse, SiteFeatureSettings, SiteStyleInfo } from "../shared/types";
+import { getSiteStyleInfo, isSiteStylingEnabled } from "../shared/style-engine";
+import { SITE_STYLING_ENABLED_KEY, type GlobalSettings, type RuntimeResponse, type SiteFeatureSettings, type SiteStyleInfo } from "../shared/types";
 
 interface PopupState {
   hostname: string | null;
   settings: GlobalSettings | null;
   siteStyleInfo: SiteStyleInfo | null;
   siteSettings: SiteFeatureSettings;
+}
+
+type PopupStateTone = "active" | "muted" | "attention";
+
+interface PopupStatusSummary {
+  label: string;
+  detail: string;
+  tone: PopupStateTone;
 }
 
 async function sendMessage<T extends object>(message: T): Promise<RuntimeResponse> {
@@ -46,7 +54,8 @@ export function App() {
     siteSettings: {},
   });
   const [status, setStatus] = useState<string>("Loading...");
-  const [isRefetching, setIsRefetching] = useState(false);
+  const [expandedFeatureInfo, setExpandedFeatureInfo] = useState<string | null>(null);
+  const featureListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +72,7 @@ export function App() {
 
       if (!cancelled) {
         setState({ hostname, settings, siteStyleInfo, siteSettings });
-        setStatus(hostname ? "Ready" : "Open any website to use controls.");
+        setStatus("");
       }
     }
 
@@ -80,6 +89,13 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    const backgroundColor = state.settings?.backgroundColor ?? DEFAULT_SETTINGS.backgroundColor;
+    const rootStyle = document.documentElement.style;
+    rootStyle.setProperty("--popup-background-color", backgroundColor);
+    rootStyle.colorScheme = getColorSchemeForBackground(backgroundColor);
+  }, [state.settings?.backgroundColor]);
+
   async function updateSettings(patch: Partial<GlobalSettings>): Promise<void> {
     if (!state.settings) {
       return;
@@ -87,11 +103,26 @@ export function App() {
 
     const next = { ...state.settings, ...patch };
     await chrome.storage.local.set({ [STORAGE_KEYS.settings]: next });
-    if (patch.autoUpdate !== undefined) {
-      await sendMessage({ type: "worker/update-auto-update", enabled: patch.autoUpdate });
-    }
     await sendMessage({ type: "worker/refresh-active-tab" });
     setState((current) => ({ ...current, settings: next }));
+  }
+
+  async function toggleWebsiteStyling(checked: boolean): Promise<void> {
+    if (!state.hostname) {
+      return;
+    }
+
+    const nextSiteSettings = {
+      ...state.siteSettings,
+      [SITE_STYLING_ENABLED_KEY]: checked,
+    };
+
+    await setSiteSettings(state.hostname, nextSiteSettings);
+    await sendMessage({ type: "worker/refresh-active-tab" });
+    setState((current) => ({
+      ...current,
+      siteSettings: nextSiteSettings,
+    }));
   }
 
   async function toggleFeature(featureName: string, checked: boolean): Promise<void> {
@@ -112,85 +143,112 @@ export function App() {
     }));
   }
 
-  async function refetchStyles(): Promise<void> {
-    setIsRefetching(true);
-    setStatus("Fetching latest styles...");
-    const response = await sendMessage({ type: "worker/refetch-styles" });
-    setIsRefetching(false);
-    setStatus(response.ok ? "Styles updated." : response.error);
-  }
-
   function openOptions(): void {
     void chrome.runtime.openOptionsPage();
   }
 
+  const websiteStylingEnabled = isSiteStylingEnabled(state.siteSettings);
+  const summary = getPopupStatusSummary(state, websiteStylingEnabled);
+  const matchedStyle = state.siteStyleInfo?.styleKey ?? null;
+  const featureControlsDisabled = !state.hostname || !state.settings?.enableStyling || !websiteStylingEnabled;
   return (
     <main className="popup-root">
       <header className="hero">
-        <p className="eyebrow">Zenium</p>
-      </header>
-
-      <section className="panel">
-        <div className="row stack">
-          <span className="label">Current site</span>
-          <strong className="hostname">{state.hostname ?? "Page not supported"}</strong>
+        <div className="hero-topline">
+          <p className="eyebrow">Zenium</p>
+          <span className={`state-badge ${summary.tone}`} title={summary.detail}>
+            {summary.label}
+          </span>
         </div>
-      </section>
-
-      <section className="panel toggles">
         <Toggle
           label="Global styling"
+          detail="Master switch across all supported websites."
           checked={state.settings?.enableStyling ?? false}
           disabled={!state.settings}
           onChange={(checked) => void updateSettings({ enableStyling: checked })}
         />
-        <Toggle
-          label="Force styling"
-          checked={state.settings?.forceStyling ?? false}
-          disabled={!state.settings}
-          onChange={(checked) => void updateSettings({ forceStyling: checked })}
-        />
-        <Toggle
-          label="Auto update"
-          checked={state.settings?.autoUpdate ?? false}
-          disabled={!state.settings}
-          onChange={(checked) => void updateSettings({ autoUpdate: checked })}
-        />
-      </section>
+      </header>
+        <section className="module feature-module">
+          <span className="section-kicker">Current website</span>
+          <h1 className="hero-title">{state.hostname ?? "Unsupported page"}</h1>
 
-      {state.siteStyleInfo?.features.length ? (
-        <section className="panel toggles">
-          <div className="row stack">
-            <span className="label">Effective style</span>
-            <strong className="hostname">{state.siteStyleInfo.styleKey}</strong>
-          </div>
-          {state.siteStyleInfo.features.map((feature) => (
-            <Toggle
-              key={feature.name}
-              label={feature.name}
-              checked={state.siteSettings[feature.name] !== false}
-              disabled={!state.hostname}
-              onChange={(checked) => void toggleFeature(feature.name, checked)}
-            />
-          ))}
+          <Toggle
+            label="Website styling"
+            detail="Pause or resume Zenium for this website only."
+            checked={websiteStylingEnabled}
+            disabled={!state.hostname}
+            onChange={(checked) => void toggleWebsiteStyling(checked)}
+          />
+          {matchedStyle ? (
+            state.siteStyleInfo?.features.length ? (
+              <div className="toggle-list" ref={featureListRef}>
+                {state.siteStyleInfo.features.map((feature) => (
+                  <Toggle
+                    key={feature.name}
+                    label={feature.name}
+                    checked={state.siteSettings[feature.name] !== false}
+                    disabled={featureControlsDisabled}
+                    compact
+                    infoExpanded={expandedFeatureInfo === feature.name}
+                    onInfoToggle={() => setExpandedFeatureInfo((current) => (current === feature.name ? null : feature.name))}
+                    onChange={(checked) => void toggleFeature(feature.name, checked)}
+                  />
+                ))}
+              </div>
+            ) : (
+              <p className="empty-copy">This style currently ships as one complete treatment without individual feature switches.</p>
+            )
+          ) : null }
         </section>
-      ) : null}
 
-      <section className="actions">
-        <button className="primary" disabled={isRefetching} onClick={() => void refetchStyles()}>
-          {isRefetching ? "Fetching..." : "Refetch styles"}
+      <footer className="popup-footer">
+        <div className="status-line">{status}</div>
+        <button className="ghost-button" onClick={openOptions}>
+          Open full settings
         </button>
-        <button className="secondary" onClick={openOptions}>
-          Advanced settings
-        </button>
-      </section>
-
-      <footer className="status">
-        <div>{status}</div>
-        {state.settings?.lastFetchedTime ? <div className="status-meta">Updated {formatLastFetchedTime(state.settings.lastFetchedTime)}</div> : null}
       </footer>
     </main>
   );
+}
+
+function getPopupStatusSummary(state: PopupState, websiteStylingEnabled: boolean): PopupStatusSummary {
+  if (!state.hostname) {
+    return {
+      label: "Unsupported page",
+      detail: "Open a standard website tab to inspect Zenium for the current page.",
+      tone: "muted",
+    };
+  }
+
+  if (!state.settings?.enableStyling) {
+    return {
+      label: "Global off",
+      detail: "Zenium is paused everywhere until Global styling is turned back on.",
+      tone: "muted",
+    };
+  }
+
+  if (!state.siteStyleInfo?.styleKey) {
+    return {
+      label: "No style",
+      detail: "This website does not currently match a repository style.",
+      tone: "attention",
+    };
+  }
+
+  if (!websiteStylingEnabled) {
+    return {
+      label: "Site off",
+      detail: "A style is available, but Zenium is paused for this website.",
+      tone: "muted",
+    };
+  }
+
+  return {
+    label: "Active",
+    detail: "Zenium is applying the matched style to this website.",
+    tone: "active",
+  };
 }
 
 function formatFeatureLabel(featureName: string): { title: string; caption?: string } {
@@ -211,25 +269,60 @@ interface ToggleProps {
   detail?: string;
   checked: boolean;
   disabled?: boolean;
+  compact?: boolean;
+  infoExpanded?: boolean;
+  onInfoToggle?: () => void;
   onChange: (checked: boolean) => void;
 }
 
-function Toggle({ label, detail, checked, disabled, onChange }: ToggleProps) {
+function Toggle({
+  label,
+  detail,
+  checked,
+  disabled,
+  compact,
+  infoExpanded,
+  onInfoToggle,
+  onChange,
+}: ToggleProps) {
+  const inputId = useId();
   const formatted = formatFeatureLabel(label);
-  const secondary = [detail, formatted.caption].filter(Boolean).join(" · ");
+  const secondary = detail;
+  const hasInfo = compact && Boolean(formatted.caption);
+  const expandedInfo = hasInfo && infoExpanded ? formatted.caption : null;
 
   return (
-    <label className={`toggle ${disabled ? "disabled" : ""}`}>
-      <span title={formatted.caption}>
-        <span className={formatted.caption ? "toggle-title has-tooltip" : "toggle-title"}>{formatted.title}</span>
-        {secondary ? <small className="toggle-detail">{secondary}</small> : null}
-      </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.checked)}
-      />
-    </label>
+    <div className={`toggle ${compact ? "compact" : ""} ${disabled ? "disabled" : ""} ${expandedInfo ? "expanded" : ""}`}>
+      <div className="toggle-row">
+        <div className="toggle-content">
+          <label className="toggle-copy" htmlFor={inputId}>
+            <span className={formatted.caption ? "toggle-title has-tooltip" : "toggle-title"}>{formatted.title}</span>
+            {secondary ? <small className="toggle-detail">{secondary}</small> : null}
+          </label>
+          {hasInfo ? (
+            <button
+              type="button"
+              className={`toggle-info ${expandedInfo ? "expanded" : ""}`}
+              aria-label={expandedInfo ? `Hide details for ${formatted.title}` : `Show details for ${formatted.title}`}
+              aria-expanded={Boolean(expandedInfo)}
+              onClick={onInfoToggle}
+            >
+              i
+            </button>
+          ) : null}
+        </div>
+        <input
+          id={inputId}
+          type="checkbox"
+          checked={checked}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+        <label className="switch-hit" htmlFor={inputId} aria-hidden="true">
+          <span className="switch" />
+        </label>
+      </div>
+      {expandedInfo ? <p className="toggle-note">{expandedInfo}</p> : null}
+    </div>
   );
 }

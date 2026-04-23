@@ -6,8 +6,10 @@ export default defineManifest({
   version: "0.1.0",
   description: "Zenium brings cleaner, content-focused website styling to Chrome, inspired by Zen Internet.",
   icons: {
-    48: "icons/logo_48.png",
-    96: "icons/logo_96.png",
+    16: "icons/icon-on-16.png",
+    32: "icons/icon-on-32.png",
+    48: "icons/icon-on-48.png",
+    128: "icons/icon-on-128.png",
   },
   permissions: ["alarms", "storage", "tabs", "webNavigation"],
   host_permissions: ["<all_urls>"],
@@ -15,8 +17,10 @@ export default defineManifest({
     default_popup: "popup.html",
     default_title: "Zenium",
     default_icon: {
-      48: "icons/logo_48.png",
-      96: "icons/logo_96.png",
+      16: "icons/icon-on-16.png",
+      32: "icons/icon-on-32.png",
+      48: "icons/icon-on-48.png",
+      128: "icons/icon-on-128.png",
     },
   },
   background: {

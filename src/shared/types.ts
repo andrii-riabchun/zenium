@@ -1,10 +1,11 @@
 export interface GlobalSettings {
   enableStyling: boolean;
   autoUpdate: boolean;
-  forceStyling: boolean;
   backgroundColor: string;
   lastFetchedTime?: number;
 }
+
+export const SITE_STYLING_ENABLED_KEY = "__enabled";
 
 export type SiteFeatureSettings = Record<string, boolean>;
 
@@ -38,7 +39,7 @@ export interface SiteStyleFeatureInfo {
 
 export interface StyleDecision {
   shouldApply: boolean;
-  reason: "globally_disabled" | "style_matched" | "force_enabled" | "no_rules";
+  reason: "globally_disabled" | "style_matched" | "no_rules";
   styleKey: string | null;
 }
 

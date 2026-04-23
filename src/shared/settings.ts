@@ -17,7 +17,6 @@ export function withDefaultSettings(settings?: Partial<GlobalSettings>): GlobalS
   const next: GlobalSettings = {
     enableStyling: settings?.enableStyling ?? DEFAULT_SETTINGS.enableStyling,
     autoUpdate: settings?.autoUpdate ?? DEFAULT_SETTINGS.autoUpdate,
-    forceStyling: settings?.forceStyling ?? DEFAULT_SETTINGS.forceStyling,
     backgroundColor: settings?.backgroundColor ?? DEFAULT_SETTINGS.backgroundColor,
   };
 
@@ -26,6 +25,37 @@ export function withDefaultSettings(settings?: Partial<GlobalSettings>): GlobalS
   }
 
   return next;
+}
+
+function parseHexColor(color: string): [number, number, number] | null {
+  const value = color.trim();
+  const shortHexMatch = value.match(/^#([0-9a-f]{3})$/i);
+  if (shortHexMatch) {
+    const [r, g, b] = shortHexMatch[1].split("").map((channel) => Number.parseInt(`${channel}${channel}`, 16));
+    return [r, g, b];
+  }
+
+  const hexMatch = value.match(/^#([0-9a-f]{6})$/i);
+  if (!hexMatch) {
+    return null;
+  }
+
+  return [
+    Number.parseInt(hexMatch[1].slice(0, 2), 16),
+    Number.parseInt(hexMatch[1].slice(2, 4), 16),
+    Number.parseInt(hexMatch[1].slice(4, 6), 16),
+  ];
+}
+
+export function getColorSchemeForBackground(backgroundColor: string): "light" | "dark" {
+  const rgb = parseHexColor(backgroundColor);
+  if (!rgb) {
+    return "dark";
+  }
+
+  const [r, g, b] = rgb;
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.6 ? "light" : "dark";
 }
 
 export function isHttpUrl(url?: string): url is string {

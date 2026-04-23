@@ -8,6 +8,7 @@ import type {
   StylesPayload,
   WebsiteFeatureMap,
 } from "./types";
+import { SITE_STYLING_ENABLED_KEY } from "./types";
 
 function getWebsiteStyles(styles: StylesPayload | null): Record<string, WebsiteFeatureMap> {
   return styles?.website ?? {};
@@ -108,7 +109,6 @@ export function getSiteStyleInfo(hostname: string, snapshot: ExtensionSnapshot):
 
 export function getStyleDecision(hostname: string, snapshot: ExtensionSnapshot): StyleDecision {
   const styleKey = resolveStyleKey(hostname, snapshot);
-  const hasForcedStyle = Boolean(snapshot.settings.forceStyling && snapshot.styles?.website?.["example.com.css"]);
 
   if (!snapshot.settings.enableStyling) {
     return {
@@ -126,14 +126,6 @@ export function getStyleDecision(hostname: string, snapshot: ExtensionSnapshot):
     };
   }
 
-  if (hasForcedStyle) {
-    return {
-      shouldApply: true,
-      reason: "force_enabled",
-      styleKey: "example.com.css",
-    };
-  }
-
   return {
     shouldApply: false,
     reason: "no_rules",
@@ -145,11 +137,19 @@ function isFeatureEnabled(
   featureName: string,
   siteSettings: SiteFeatureSettings,
 ): boolean {
+  if (featureName === SITE_STYLING_ENABLED_KEY) {
+    return false;
+  }
+
   if (siteSettings[featureName] === false) {
     return false;
   }
 
   return true;
+}
+
+export function isSiteStylingEnabled(siteSettings: SiteFeatureSettings): boolean {
+  return siteSettings[SITE_STYLING_ENABLED_KEY] !== false;
 }
 
 export function buildCssForHostname(
@@ -162,6 +162,10 @@ export function buildCssForHostname(
   const styleKey = decision.styleKey;
 
   if (!decision.shouldApply) {
+    return null;
+  }
+
+  if (!isSiteStylingEnabled(siteSettings)) {
     return null;
   }
 

@@ -15,17 +15,20 @@ export const AUTO_UPDATE_ALARM = "styles-auto-update";
 export const DEFAULT_SETTINGS: GlobalSettings = {
   enableStyling: true,
   autoUpdate: true,
-  forceStyling: false,
   backgroundColor: "#08101d",
 };
 
 export const ICONS = {
   on: {
-    48: "icons/logo_48.png",
-    96: "icons/logo_96.png",
+    16: "icons/icon-on-16.png",
+    32: "icons/icon-on-32.png",
+    48: "icons/icon-on-48.png",
+    128: "icons/icon-on-128.png",
   },
   off: {
-    48: "icons/logo-off_48.png",
-    96: "icons/logo-off_96.png",
+    16: "icons/icon-off-16.png",
+    32: "icons/icon-off-32.png",
+    48: "icons/icon-off-48.png",
+    128: "icons/icon-off-128.png",
   },
 } as const;
