@@ -3,7 +3,7 @@ import { defineManifest } from "@crxjs/vite-plugin";
 export default defineManifest({
   manifest_version: 3,
   name: "Zenium",
-  version: "0.1.0",
+  version: "1.0.0",
   description: "Zenium brings cleaner, content-focused website styling to Chrome, inspired by Zen Internet.",
   icons: {
     16: "icons/icon-on-16.png",
