@@ -4,7 +4,27 @@ on:
   push:
     branches:
       - main
+    paths:
+      - ".github/workflows/build-extension.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "popup.html"
+      - "public/**"
+      - "src/**"
+      - "tsconfig*.json"
+      - "vite.config.*"
+      - "options.html"
   pull_request:
+    paths:
+      - ".github/workflows/build-extension.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "popup.html"
+      - "public/**"
+      - "src/**"
+      - "tsconfig*.json"
+      - "vite.config.*"
+      - "options.html"
   workflow_dispatch:
     inputs:
       publish_mode:
@@ -19,6 +39,45 @@ on:
           - staged_publish
 
 jobs:
+  version_check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      manifest_changed: ${{ steps.check.outputs.manifest_changed }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect manifest update
+        id: check
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT_NAME" != "push" ]; then
+            echo "manifest_changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
+            echo "manifest_changed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- src/manifest.ts; then
+            echo "manifest_changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "manifest_changed=true" >> "$GITHUB_OUTPUT"
+
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -77,14 +136,18 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   release:
-    needs: build
-    if: github.event_name == 'workflow_dispatch' && inputs.publish_mode != 'no_upload'
+    needs: [version_check, build]
+    if: >
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_mode != 'no_upload') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.version_check.outputs.manifest_changed == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
     concurrency:
       group: chrome-web-store-release
       cancel-in-progress: false
+    env:
+      EFFECTIVE_PUBLISH_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_mode || 'staged_publish' }}
 
     steps:
       - name: Download packaged artifact
@@ -244,13 +307,13 @@ jobs:
           exit 1
 
       - name: Submit release to Chrome Web Store
-        if: inputs.publish_mode != 'upload_only'
+        if: env.EFFECTIVE_PUBLISH_MODE != 'upload_only'
         id: publish
         env:
           CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
           CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
           CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
-          PUBLISH_MODE: ${{ inputs.publish_mode }}
+          PUBLISH_MODE: ${{ env.EFFECTIVE_PUBLISH_MODE }}
         run: |
           set -euo pipefail
 
@@ -290,7 +353,7 @@ jobs:
           ITEM_STATE: ${{ steps.publish.outputs.item_state }}
           PACKAGE_NAME: ${{ needs.build.outputs.archive_name }}
           PACKAGE_VERSION: ${{ needs.build.outputs.version }}
-          PUBLISH_MODE: ${{ inputs.publish_mode }}
+          PUBLISH_MODE: ${{ env.EFFECTIVE_PUBLISH_MODE }}
           FINAL_UPLOAD_STATE: ${{ steps.upload_status.outputs.upload_state }}
           INITIAL_UPLOAD_STATE: ${{ steps.upload.outputs.upload_state }}
         run: |
