@@ -101,6 +101,7 @@ jobs:
         with:
           name: ${{ needs.build.outputs.archive_name }}
           path: release
+          skip-decompress: true
 
       - name: Validate release tag
         env:
