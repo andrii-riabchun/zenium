@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
     paths:
       - ".github/workflows/build-extension.yml"
       - "package.json"
@@ -25,66 +27,14 @@ on:
       - "tsconfig*.json"
       - "vite.config.*"
       - "options.html"
-  workflow_dispatch:
-    inputs:
-      publish_mode:
-        description: What to do after packaging the extension
-        type: choice
-        required: true
-        default: no_upload
-        options:
-          - no_upload
-          - upload_only
-          - default_publish
-          - staged_publish
 
 jobs:
-  version_check:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    outputs:
-      manifest_changed: ${{ steps.check.outputs.manifest_changed }}
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Detect manifest update
-        id: check
-        env:
-          BEFORE_SHA: ${{ github.event.before }}
-          EVENT_NAME: ${{ github.event_name }}
-          CURRENT_SHA: ${{ github.sha }}
-        run: |
-          set -euo pipefail
-
-          if [ "$EVENT_NAME" != "push" ]; then
-            echo "manifest_changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if [ "$BEFORE_SHA" = "0000000000000000000000000000000000000000" ]; then
-            echo "manifest_changed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- src/manifest.ts; then
-            echo "manifest_changed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "manifest_changed=true" >> "$GITHUB_OUTPUT"
-
   build:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       archive_name: ${{ steps.package.outputs.archive_name }}
-      artifact_name: ${{ steps.package.outputs.artifact_name }}
       version: ${{ steps.package.outputs.version }}
 
     steps:
@@ -109,21 +59,19 @@ jobs:
           set -euo pipefail
           VERSION=$(node --input-type=module -e "import fs from 'node:fs'; const manifest = JSON.parse(fs.readFileSync('dist/manifest.json', 'utf8')); process.stdout.write(manifest.version);")
           ARCHIVE_NAME="zenium-${VERSION}.zip"
-          ARTIFACT_NAME="zenium-extension-${VERSION}"
           mkdir -p release
           (
             cd dist
             zip -rq "../release/${ARCHIVE_NAME}" . -x "*.DS_Store"
           )
           echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Upload packaged artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: ${{ steps.package.outputs.artifact_name }}
           path: release/${{ steps.package.outputs.archive_name }}
+          archive: false
           if-no-files-found: error
 
       - name: Write build summary
@@ -136,239 +84,74 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   release:
-    needs: [version_check, build]
-    if: >
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && inputs.publish_mode != 'no_upload') ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.version_check.outputs.manifest_changed == 'true')
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
-      contents: read
-    concurrency:
-      group: chrome-web-store-release
-      cancel-in-progress: false
-    env:
-      EFFECTIVE_PUBLISH_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_mode || 'staged_publish' }}
+      contents: write
 
     steps:
-      - name: Download packaged artifact
-        uses: actions/download-artifact@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
         with:
-          name: ${{ needs.build.outputs.artifact_name }}
+          fetch-depth: 0
+
+      - name: Download packaged artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.archive_name }}
           path: release
 
-      - name: Validate Chrome Web Store configuration
+      - name: Validate release tag
         env:
-          CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
-          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
-          CWS_SERVICE_ACCOUNT_KEY_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_KEY_JSON }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          missing=0
-          for name in CWS_ITEM_ID CWS_PUBLISHER_ID CWS_SERVICE_ACCOUNT_KEY_JSON; do
-            if [ -z "${!name}" ]; then
-              echo "::error title=Missing configuration::$name is not configured"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then
+
+          EXPECTED_TAG="v${PACKAGE_VERSION}"
+          if [ "$RELEASE_TAG" != "$EXPECTED_TAG" ]; then
+            echo "::error title=Tag/version mismatch::Expected tag '$EXPECTED_TAG' for manifest version '$PACKAGE_VERSION', got '$RELEASE_TAG'."
             exit 1
           fi
 
-      - name: Generate Chrome Web Store access token
-        id: auth
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$RELEASE_SHA" origin/main; then
+            echo "::error title=Tag is not on main::Release tags must point to a commit that is already reachable from main."
+            exit 1
+          fi
+
+      - name: Create or update GitHub release
+        id: publish_release
         env:
-          CWS_SERVICE_ACCOUNT_KEY_JSON: ${{ secrets.CWS_SERVICE_ACCOUNT_KEY_JSON }}
-        run: |
-          set -euo pipefail
-          node --input-type=module <<'EOF'
-          import crypto from 'node:crypto';
-          import fs from 'node:fs';
-
-          const serviceAccount = JSON.parse(process.env.CWS_SERVICE_ACCOUNT_KEY_JSON);
-          const now = Math.floor(Date.now() / 1000);
-          const encode = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
-
-          const header = { alg: 'RS256', typ: 'JWT' };
-          const claims = {
-            iss: serviceAccount.client_email,
-            scope: 'https://www.googleapis.com/auth/chromewebstore',
-            aud: 'https://oauth2.googleapis.com/token',
-            exp: now + 3600,
-            iat: now,
-          };
-
-          const unsignedToken = `${encode(header)}.${encode(claims)}`;
-          const signature = crypto
-            .createSign('RSA-SHA256')
-            .update(unsignedToken)
-            .end()
-            .sign(serviceAccount.private_key, 'base64url');
-          const assertion = `${unsignedToken}.${signature}`;
-
-          const response = await fetch('https://oauth2.googleapis.com/token', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: new URLSearchParams({
-              grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-              assertion,
-            }),
-          });
-
-          if (!response.ok) {
-            console.error(await response.text());
-            process.exit(1);
-          }
-
-          const data = await response.json();
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, `access_token=${data.access_token}\n`);
-          EOF
-
-      - name: Upload package draft to Chrome Web Store
-        id: upload
-        env:
-          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
-          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
-          PACKAGE_PATH: release/${{ needs.build.outputs.archive_name }}
-        run: |
-          set -euo pipefail
-          RESPONSE_FILE="$RUNNER_TEMP/cws-upload-response.json"
-
-          curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer $CWS_ACCESS_TOKEN" \
-            -T "$PACKAGE_PATH" \
-            "https://chromewebstore.googleapis.com/upload/v2/publishers/$CWS_PUBLISHER_ID/items/$CWS_ITEM_ID:upload" \
-            > "$RESPONSE_FILE"
-
-          cat "$RESPONSE_FILE"
-
-          UPLOAD_STATE=$(node --input-type=module -e "import fs from 'node:fs'; const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(data.uploadState ?? '');" "$RESPONSE_FILE")
-          echo "upload_state=$UPLOAD_STATE" >> "$GITHUB_OUTPUT"
-
-      - name: Wait for Chrome Web Store upload processing
-        id: upload_status
-        env:
-          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
-          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
-          INITIAL_UPLOAD_STATE: ${{ steps.upload.outputs.upload_state }}
+          ARCHIVE_NAME: ${{ needs.build.outputs.archive_name }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
 
-          case "$INITIAL_UPLOAD_STATE" in
-            SUCCEEDED)
-              echo "upload_state=SUCCEEDED" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-            FAILED)
-              echo "::error title=Chrome Web Store upload failed::The package upload failed immediately."
-              exit 1
-              ;;
-            IN_PROGRESS|"")
-              ;;
-            *)
-              echo "::error title=Unexpected upload state::Received '$INITIAL_UPLOAD_STATE'"
-              exit 1
-              ;;
-          esac
+          ASSET_PATH="release/${ARCHIVE_NAME}"
 
-          for attempt in $(seq 1 24); do
-            sleep 5
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "$ASSET_PATH" --clobber
+          else
+            gh release create "$RELEASE_TAG" "$ASSET_PATH" --title "$RELEASE_TAG" --generate-notes
+          fi
 
-            RESPONSE_FILE="$RUNNER_TEMP/cws-fetch-status.json"
-            curl --fail-with-body -sS \
-              -H "Authorization: Bearer $CWS_ACCESS_TOKEN" \
-              "https://chromewebstore.googleapis.com/v2/publishers/$CWS_PUBLISHER_ID/items/$CWS_ITEM_ID:fetchStatus" \
-              > "$RESPONSE_FILE"
-
-            cat "$RESPONSE_FILE"
-
-            LAST_ASYNC_UPLOAD_STATE=$(node --input-type=module -e "import fs from 'node:fs'; const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(data.lastAsyncUploadState ?? '');" "$RESPONSE_FILE")
-
-            case "$LAST_ASYNC_UPLOAD_STATE" in
-              SUCCEEDED)
-                echo "upload_state=SUCCEEDED" >> "$GITHUB_OUTPUT"
-                exit 0
-                ;;
-              FAILED)
-                echo "::error title=Chrome Web Store upload failed::The package upload failed during processing."
-                exit 1
-                ;;
-              IN_PROGRESS|NOT_FOUND|"")
-                ;;
-              *)
-                echo "::error title=Unexpected async upload state::Received '$LAST_ASYNC_UPLOAD_STATE'"
-                exit 1
-                ;;
-            esac
-          done
-
-          echo "::error title=Chrome Web Store upload timed out::The upload did not reach SUCCEEDED within 120 seconds."
-          exit 1
-
-      - name: Submit release to Chrome Web Store
-        if: env.EFFECTIVE_PUBLISH_MODE != 'upload_only'
-        id: publish
-        env:
-          CWS_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
-          CWS_ITEM_ID: ${{ secrets.CWS_ITEM_ID }}
-          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
-          PUBLISH_MODE: ${{ env.EFFECTIVE_PUBLISH_MODE }}
-        run: |
-          set -euo pipefail
-
-          case "$PUBLISH_MODE" in
-            default_publish)
-              PUBLISH_TYPE="DEFAULT_PUBLISH"
-              ;;
-            staged_publish)
-              PUBLISH_TYPE="STAGED_PUBLISH"
-              ;;
-            *)
-              echo "::error title=Unsupported publish mode::Received '$PUBLISH_MODE'"
-              exit 1
-              ;;
-          esac
-
-          REQUEST_FILE="$RUNNER_TEMP/cws-publish-request.json"
-          RESPONSE_FILE="$RUNNER_TEMP/cws-publish-response.json"
-
-          printf '{"publishType":"%s"}\n' "$PUBLISH_TYPE" > "$REQUEST_FILE"
-
-          curl --fail-with-body -sS -X POST \
-            -H "Authorization: Bearer $CWS_ACCESS_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @"$REQUEST_FILE" \
-            "https://chromewebstore.googleapis.com/v2/publishers/$CWS_PUBLISHER_ID/items/$CWS_ITEM_ID:publish" \
-            > "$RESPONSE_FILE"
-
-          cat "$RESPONSE_FILE"
-
-          ITEM_STATE=$(node --input-type=module -e "import fs from 'node:fs'; const data = JSON.parse(fs.readFileSync(process.argv[1], 'utf8')); process.stdout.write(data.state ?? '');" "$RESPONSE_FILE")
-          echo "item_state=$ITEM_STATE" >> "$GITHUB_OUTPUT"
+          RELEASE_URL=$(gh release view "$RELEASE_TAG" --json url --jq '.url')
+          echo "release_url=$RELEASE_URL" >> "$GITHUB_OUTPUT"
 
       - name: Write release summary
-        if: always()
         env:
-          ITEM_STATE: ${{ steps.publish.outputs.item_state }}
-          PACKAGE_NAME: ${{ needs.build.outputs.archive_name }}
-          PACKAGE_VERSION: ${{ needs.build.outputs.version }}
-          PUBLISH_MODE: ${{ env.EFFECTIVE_PUBLISH_MODE }}
-          FINAL_UPLOAD_STATE: ${{ steps.upload_status.outputs.upload_state }}
-          INITIAL_UPLOAD_STATE: ${{ steps.upload.outputs.upload_state }}
+          ARCHIVE_NAME: ${{ needs.build.outputs.archive_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_URL: ${{ steps.publish_release.outputs.release_url }}
         run: |
-          UPLOAD_STATE="$FINAL_UPLOAD_STATE"
-          if [ -z "$UPLOAD_STATE" ]; then
-            UPLOAD_STATE="$INITIAL_UPLOAD_STATE"
-          fi
           {
             echo "## Release"
             echo ""
-            echo "- Package: \`$PACKAGE_NAME\`"
-            echo "- Version: \`$PACKAGE_VERSION\`"
-            echo "- Publish mode: \`$PUBLISH_MODE\`"
-            echo "- Upload state: \`${UPLOAD_STATE:-unknown}\`"
-            if [ "$PUBLISH_MODE" != "upload_only" ] && [ -n "$ITEM_STATE" ]; then
-              echo "- Submission state: \`$ITEM_STATE\`"
-            fi
+            echo "- Tag: \`${RELEASE_TAG}\`"
+            echo "- Asset: \`${ARCHIVE_NAME}\`"
+            echo "- Release: ${RELEASE_URL}"
           } >> "$GITHUB_STEP_SUMMARY"
