@@ -158,6 +158,11 @@ input {
   gap: 0;
 }
 
+.feature-module > .toggle + .toggle-list,
+.feature-module > .toggle + .empty-copy {
+  margin-top: 2px;
+}
+
 .toggle {
   position: relative;
   display: grid;

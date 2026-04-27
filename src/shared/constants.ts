@@ -5,6 +5,7 @@ export const STORAGE_KEYS = {
   styles: "styles",
   stylesMapping: "stylesMapping",
   stylesRepositoryUrl: "stylesRepositoryUrl",
+  backgroundImageDataUrl: "backgroundImageDataUrl",
 } as const;
 
 export const DEFAULT_REPOSITORY_URL =
@@ -16,7 +17,13 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
   enableStyling: true,
   autoUpdate: true,
   backgroundColor: "#08101d",
+  backgroundImageMode: "fill",
+  backgroundImageTintOpacity: 0,
+  backgroundImageBlurPx: 0,
 };
+
+export const MAX_BACKGROUND_IMAGE_TINT_OPACITY = 100;
+export const MAX_BACKGROUND_IMAGE_BLUR_PX = 24;
 
 export const ICONS = {
   on: {

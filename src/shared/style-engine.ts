@@ -8,7 +8,7 @@ import type {
   StylesPayload,
   WebsiteFeatureMap,
 } from "./types";
-import { SITE_STYLING_ENABLED_KEY } from "./types";
+import { SITE_BACKGROUND_IMAGE_ENABLED_KEY, SITE_STYLING_ENABLED_KEY } from "./types";
 
 function getWebsiteStyles(styles: StylesPayload | null): Record<string, WebsiteFeatureMap> {
   return styles?.website ?? {};
@@ -137,7 +137,7 @@ function isFeatureEnabled(
   featureName: string,
   siteSettings: SiteFeatureSettings,
 ): boolean {
-  if (featureName === SITE_STYLING_ENABLED_KEY) {
+  if (featureName === SITE_STYLING_ENABLED_KEY || featureName === SITE_BACKGROUND_IMAGE_ENABLED_KEY) {
     return false;
   }
 
@@ -150,6 +150,29 @@ function isFeatureEnabled(
 
 export function isSiteStylingEnabled(siteSettings: SiteFeatureSettings): boolean {
   return siteSettings[SITE_STYLING_ENABLED_KEY] !== false;
+}
+
+export function isSiteBackgroundImageEnabled(siteSettings: SiteFeatureSettings): boolean {
+  return siteSettings[SITE_BACKGROUND_IMAGE_ENABLED_KEY] !== false;
+}
+
+function buildPageBackgroundCss(
+  snapshot: ExtensionSnapshot,
+  siteSettings: SiteFeatureSettings,
+): string {
+  if (!snapshot.backgroundImageDataUrl || !isSiteBackgroundImageEnabled(siteSettings)) {
+    return "";
+  }
+
+  return [
+    "html {",
+    `  background-color: ${snapshot.settings.backgroundColor} !important;`,
+    "}",
+    "body {",
+    "  background-color: transparent !important;",
+    "  background-image: none !important;",
+    "}",
+  ].join("\n");
 }
 
 export function buildCssForHostname(
@@ -170,15 +193,21 @@ export function buildCssForHostname(
   }
 
   let combinedCss = "";
+  const preserveTransparentBackground = Boolean(snapshot.backgroundImageDataUrl) && isSiteBackgroundImageEnabled(siteSettings);
   if (decision.shouldApply && styleKey && styles[styleKey]) {
     for (const [featureName, css] of Object.entries(styles[styleKey])) {
       if (isFeatureEnabled(featureName, siteSettings)) {
-        const rewrittenCss = rewriteChromeBackgroundCss(css, snapshot.settings.backgroundColor).trim();
+        const rewrittenCss = rewriteChromeBackgroundCss(css, snapshot.settings.backgroundColor, preserveTransparentBackground).trim();
         if (rewrittenCss) {
           combinedCss += `${rewrittenCss}\n`;
         }
       }
     }
+  }
+
+  const pageBackgroundCss = buildPageBackgroundCss(snapshot, siteSettings).trim();
+  if (pageBackgroundCss) {
+    combinedCss += `${pageBackgroundCss}\n`;
   }
 
   return combinedCss.trim() ? combinedCss.trim() : null;

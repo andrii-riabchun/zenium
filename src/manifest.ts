@@ -11,7 +11,7 @@ export default defineManifest({
     48: "icons/icon-on-48.png",
     128: "icons/icon-on-128.png",
   },
-  permissions: ["alarms", "storage", "tabs", "webNavigation"],
+  permissions: ["alarms", "storage", "tabs", "unlimitedStorage", "webNavigation"],
   host_permissions: ["<all_urls>"],
   action: {
     default_popup: "popup.html",

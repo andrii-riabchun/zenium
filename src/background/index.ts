@@ -198,6 +198,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 
   const shouldRefresh =
     STORAGE_KEYS.settings in changes ||
+    STORAGE_KEYS.backgroundImageDataUrl in changes ||
     STORAGE_KEYS.styles in changes ||
     STORAGE_KEYS.stylesMapping in changes ||
     Object.keys(changes).some((key) => key.startsWith(`${STORAGE_KEYS.settings}.`));

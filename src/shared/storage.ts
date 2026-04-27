@@ -42,6 +42,20 @@ export async function getGlobalSettings(): Promise<GlobalSettings> {
   return withDefaultSettings(result[STORAGE_KEYS.settings] as Partial<GlobalSettings> | undefined);
 }
 
+export async function getBackgroundImageDataUrl(): Promise<string | null> {
+  const result = await chrome.storage.local.get(STORAGE_KEYS.backgroundImageDataUrl);
+  const value = result[STORAGE_KEYS.backgroundImageDataUrl];
+  return typeof value === "string" && value ? value : null;
+}
+
+export async function setBackgroundImageDataUrl(dataUrl: string): Promise<void> {
+  await chrome.storage.local.set({ [STORAGE_KEYS.backgroundImageDataUrl]: dataUrl });
+}
+
+export async function removeBackgroundImageDataUrl(): Promise<void> {
+  await chrome.storage.local.remove(STORAGE_KEYS.backgroundImageDataUrl);
+}
+
 export async function setGlobalSettings(settings: GlobalSettings): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings });
 }
@@ -110,12 +124,13 @@ export async function setRepositoryUrl(url: string): Promise<void> {
 }
 
 export async function ensureStorageDefaults(): Promise<ExtensionSnapshot> {
-  const [settings, styles, stylesMapping, repositoryUrl] =
+  const [settings, styles, stylesMapping, repositoryUrl, backgroundImageDataUrl] =
     await Promise.all([
       getGlobalSettings(),
       getStylesPayload(),
       getStoredMapping(STORAGE_KEYS.stylesMapping),
       getRepositoryUrl(),
+      getBackgroundImageDataUrl(),
     ]);
 
   await chrome.storage.local.set({
@@ -129,6 +144,7 @@ export async function ensureStorageDefaults(): Promise<ExtensionSnapshot> {
     styles,
     stylesMapping,
     repositoryUrl,
+    backgroundImageDataUrl,
   };
 }
 

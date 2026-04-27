@@ -1,15 +1,22 @@
 import { useEffect, useId, useRef, useState } from "react";
 
 import { DEFAULT_SETTINGS, STORAGE_KEYS } from "../shared/constants";
-import { getColorSchemeForBackground, normalizeHostname } from "../shared/settings";
+import { getColorSchemeForBackground, hasConfiguredBackgroundImage, normalizeHostname } from "../shared/settings";
 import {
   getGlobalSettings,
   getSiteSettings,
   getSnapshot,
   setSiteSettings,
 } from "../shared/storage";
-import { getSiteStyleInfo, isSiteStylingEnabled } from "../shared/style-engine";
-import { SITE_STYLING_ENABLED_KEY, type GlobalSettings, type RuntimeResponse, type SiteFeatureSettings, type SiteStyleInfo } from "../shared/types";
+import { getSiteStyleInfo, isSiteBackgroundImageEnabled, isSiteStylingEnabled } from "../shared/style-engine";
+import {
+  SITE_BACKGROUND_IMAGE_ENABLED_KEY,
+  SITE_STYLING_ENABLED_KEY,
+  type GlobalSettings,
+  type RuntimeResponse,
+  type SiteFeatureSettings,
+  type SiteStyleInfo,
+} from "../shared/types";
 
 interface PopupState {
   hostname: string | null;
@@ -36,14 +43,6 @@ async function getActiveHostname(): Promise<string | null> {
     return null;
   }
   return normalizeHostname(new URL(tab.url).hostname);
-}
-
-function formatLastFetchedTime(timestamp?: number): string | null {
-  if (typeof timestamp !== "number") {
-    return null;
-  }
-
-  return new Date(timestamp).toLocaleString();
 }
 
 export function App() {
@@ -143,11 +142,31 @@ export function App() {
     }));
   }
 
+  async function toggleSiteBackgroundImage(checked: boolean): Promise<void> {
+    if (!state.hostname) {
+      return;
+    }
+
+    const nextSiteSettings = {
+      ...state.siteSettings,
+      [SITE_BACKGROUND_IMAGE_ENABLED_KEY]: checked,
+    };
+
+    await setSiteSettings(state.hostname, nextSiteSettings);
+    await sendMessage({ type: "worker/refresh-active-tab" });
+    setState((current) => ({
+      ...current,
+      siteSettings: nextSiteSettings,
+    }));
+  }
+
   function openOptions(): void {
     void chrome.runtime.openOptionsPage();
   }
 
   const websiteStylingEnabled = isSiteStylingEnabled(state.siteSettings);
+  const backgroundImageAvailable = hasConfiguredBackgroundImage(state.settings);
+  const siteBackgroundImageEnabled = isSiteBackgroundImageEnabled(state.siteSettings);
   const summary = getPopupStatusSummary(state, websiteStylingEnabled);
   const matchedStyle = state.siteStyleInfo?.styleKey ?? null;
   const featureControlsDisabled = !state.hostname || !state.settings?.enableStyling || !websiteStylingEnabled;
@@ -178,6 +197,13 @@ export function App() {
             checked={websiteStylingEnabled}
             disabled={!state.hostname}
             onChange={(checked) => void toggleWebsiteStyling(checked)}
+          />
+          <Toggle
+            label="Background image"
+            detail={backgroundImageAvailable ? "Use the global fallback image on this website only." : "Upload a fallback image in full settings first."}
+            checked={siteBackgroundImageEnabled}
+            disabled={!state.hostname || !backgroundImageAvailable}
+            onChange={(checked) => void toggleSiteBackgroundImage(checked)}
           />
           {matchedStyle ? (
             state.siteStyleInfo?.features.length ? (

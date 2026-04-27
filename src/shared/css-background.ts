@@ -83,7 +83,7 @@ function findMatchingBrace(css: string, openIndex: number): number {
   return -1;
 }
 
-function rewriteDeclaration(declaration: string, backgroundColor: string): string {
+function rewriteDeclaration(declaration: string, backgroundColor: string, preserveTransparentBackground: boolean): string {
   const important = /\s*!important\s*$/i.test(declaration) ? " !important" : "";
   const match = declaration.match(/^\s*([^:]+):\s*(.*?)\s*(?:!important\s*)?$/i);
   if (!match) {
@@ -95,30 +95,30 @@ function rewriteDeclaration(declaration: string, backgroundColor: string): strin
   const lowerProperty = property.toLowerCase();
 
   if (lowerProperty === "background-color" && TRANSPARENT_COLOR_RE.test(value)) {
-    return `${property}: ${backgroundColor}${important}`;
+    return preserveTransparentBackground ? declaration : `${property}: ${backgroundColor}${important}`;
   }
 
   if (lowerProperty === "background" && /^(?:none|transparent|#0000|#00000000)$/i.test(value)) {
-    return `${property}: ${backgroundColor}${important}`;
+    return preserveTransparentBackground ? declaration : `${property}: ${backgroundColor}${important}`;
   }
 
   if (/^--[\w-]*(?:bg|background|surface|canvas|wash|overlay)[\w-]*$/i.test(property) && TRANSPARENT_VAR_RE.test(value)) {
-    return `${property}: ${backgroundColor}${important}`;
+    return preserveTransparentBackground ? declaration : `${property}: ${backgroundColor}${important}`;
   }
 
   return declaration;
 }
 
-function rewriteDeclarations(declarations: string, backgroundColor: string): string {
+function rewriteDeclarations(declarations: string, backgroundColor: string, preserveTransparentBackground: boolean): string {
   const parts = splitTopLevel(declarations, ";");
   if (parts.length === 0) {
     return declarations;
   }
 
-  return `${parts.map((part) => rewriteDeclaration(part, backgroundColor)).join("; ")};`;
+  return `${parts.map((part) => rewriteDeclaration(part, backgroundColor, preserveTransparentBackground)).join("; ")};`;
 }
 
-function rewriteRule(rule: string, backgroundColor: string): string {
+function rewriteRule(rule: string, backgroundColor: string, preserveTransparentBackground: boolean): string {
   const openIndex = rule.indexOf("{");
   const closeIndex = rule.lastIndexOf("}");
   if (openIndex === -1 || closeIndex === -1 || closeIndex <= openIndex) {
@@ -129,13 +129,13 @@ function rewriteRule(rule: string, backgroundColor: string): string {
   const body = rule.slice(openIndex + 1, closeIndex);
 
   if (prelude.startsWith("@")) {
-    return `${prelude} {${rewriteChromeBackgroundCss(body, backgroundColor)}}`;
+    return `${prelude} {${rewriteChromeBackgroundCss(body, backgroundColor, preserveTransparentBackground)}}`;
   }
 
-  return `${prelude} {${rewriteDeclarations(body, backgroundColor)}}`;
+  return `${prelude} {${rewriteDeclarations(body, backgroundColor, preserveTransparentBackground)}}`;
 }
 
-export function rewriteChromeBackgroundCss(css: string, backgroundColor: string): string {
+export function rewriteChromeBackgroundCss(css: string, backgroundColor: string, preserveTransparentBackground = false): string {
   let output = "";
   let cursor = 0;
 
@@ -152,7 +152,7 @@ export function rewriteChromeBackgroundCss(css: string, backgroundColor: string)
       break;
     }
 
-    output += rewriteRule(css.slice(cursor, closeIndex + 1), backgroundColor);
+    output += rewriteRule(css.slice(cursor, closeIndex + 1), backgroundColor, preserveTransparentBackground);
     cursor = closeIndex + 1;
   }
 

@@ -1,11 +1,20 @@
+export type BackgroundImageMode = "stretch" | "tile" | "fill" | "fit" | "center";
+
 export interface GlobalSettings {
   enableStyling: boolean;
   autoUpdate: boolean;
   backgroundColor: string;
+  backgroundImageMode: BackgroundImageMode;
+  backgroundImageTintOpacity: number;
+  backgroundImageBlurPx: number;
+  backgroundImageName?: string;
+  backgroundImageMimeType?: string;
+  backgroundImageSizeBytes?: number;
   lastFetchedTime?: number;
 }
 
 export const SITE_STYLING_ENABLED_KEY = "__enabled";
+export const SITE_BACKGROUND_IMAGE_ENABLED_KEY = "__backgroundImageEnabled";
 
 export type SiteFeatureSettings = Record<string, boolean>;
 
@@ -25,6 +34,7 @@ export interface ExtensionSnapshot {
   styles: StylesPayload | null;
   stylesMapping: StoredMapping;
   repositoryUrl: string;
+  backgroundImageDataUrl: string | null;
 }
 
 export interface SiteStyleInfo {
