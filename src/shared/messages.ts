@@ -14,8 +14,6 @@ export function isRuntimeRequest(value: unknown): value is RuntimeRequest {
     case "worker/refetch-styles":
     case "worker/refresh-active-tab":
       return true;
-    case "worker/update-auto-update":
-      return typeof value.enabled === "boolean";
     default:
       return false;
   }

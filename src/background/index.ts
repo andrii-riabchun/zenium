@@ -2,7 +2,7 @@ import { AUTO_UPDATE_ALARM, ICONS, STORAGE_KEYS } from "../shared/constants";
 import { isRuntimeRequest } from "../shared/messages";
 import { refreshStylesFromRepository } from "../shared/repo";
 import { isHttpUrl, normalizeHostname } from "../shared/settings";
-import { ensureStorageDefaults, getGlobalSettings, getSiteSettings, getSnapshot, patchGlobalSettings } from "../shared/storage";
+import { ensureStorageDefaults, getGlobalSettings, getSiteSettings, getSnapshot } from "../shared/storage";
 import { buildCssForHostname } from "../shared/style-engine";
 import type { ContentMessage, RuntimeResponse } from "../shared/types";
 
@@ -148,12 +148,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      if (message.type === "worker/update-auto-update") {
-        await patchGlobalSettings({ autoUpdate: message.enabled });
-        await syncAutoUpdateAlarm();
-        respond({ ok: true });
-        return;
-      }
     } catch (error) {
       const nextError = error instanceof Error ? error.message : "Unknown error";
       respond({ ok: false, error: nextError });
@@ -194,6 +188,10 @@ chrome.webNavigation.onCommitted.addListener((details) => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local") {
     return;
+  }
+
+  if (STORAGE_KEYS.settings in changes) {
+    void syncAutoUpdateAlarm();
   }
 
   const shouldRefresh =

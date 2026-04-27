@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import {
   DEFAULT_REPOSITORY_URL,
@@ -11,11 +11,10 @@ import {
   getBackgroundImageDataUrl,
   getGlobalSettings,
   getRepositoryUrl,
-  removeBackgroundImageDataUrl,
   setRepositoryUrl,
-  setBackgroundImageDataUrl,
 } from "../shared/storage";
 import {
+  getBackgroundImagePresentation,
   getBackgroundImageScaleForBlur,
   getColorSchemeForBackground,
   getCssColorWithOpacity,
@@ -111,13 +110,26 @@ export function App() {
   });
   const [isRefetching, setIsRefetching] = useState(false);
   const [isSavingBackgroundImage, setIsSavingBackgroundImage] = useState(false);
+  const stateRef = useRef<OptionsState | null>(null);
+  const settingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+
+  function syncState(nextState: OptionsState | null): void {
+    stateRef.current = nextState;
+    setState(nextState);
+  }
+
+  function queueSettingsWrite(write: () => Promise<void>): Promise<void> {
+    const queuedWrite = settingsSaveQueueRef.current.catch(() => undefined).then(write);
+    settingsSaveQueueRef.current = queuedWrite;
+    return queuedWrite;
+  }
 
   useEffect(() => {
     let cancelled = false;
 
     void loadState().then((nextState) => {
       if (!cancelled) {
-        setState(nextState);
+        syncState(nextState);
         setStatus(null);
       }
     });
@@ -135,49 +147,17 @@ export function App() {
   }, [state?.settings.backgroundColor]);
 
   async function saveRepositoryUrl(): Promise<void> {
-    if (!state) {
+    const current = stateRef.current;
+    if (!current) {
       return;
     }
 
-    await setRepositoryUrl(state.repositoryUrl.trim() || DEFAULT_REPOSITORY_URL);
+    await setRepositoryUrl(current.repositoryUrl.trim() || DEFAULT_REPOSITORY_URL);
     setStatus({ message: "Repository source saved.", tone: "positive" });
   }
 
-  async function saveBackgroundColor(): Promise<void> {
-    if (!state) {
-      return;
-    }
-
-    const settings = {
-      ...state.settings,
-      backgroundColor: state.settings.backgroundColor,
-    };
-
-    await chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings });
-    await chrome.runtime.sendMessage({ type: "worker/refresh-active-tab" });
-    setStatus({ message: "Background color saved.", tone: "positive" });
-  }
-
-  async function saveBackgroundMode(mode: BackgroundImageMode): Promise<void> {
-    await updateSettings({ backgroundImageMode: mode }, "Background image mode saved.");
-  }
-
-  async function saveBackgroundImageEffects(): Promise<void> {
-    if (!state) {
-      return;
-    }
-
-    await updateSettings(
-      {
-        backgroundImageTintOpacity: normalizeBackgroundImageTintOpacity(state.settings.backgroundImageTintOpacity),
-        backgroundImageBlurPx: normalizeBackgroundImageBlurPx(state.settings.backgroundImageBlurPx),
-      },
-      "Background image effects saved.",
-    );
-  }
-
   async function uploadBackgroundImage(file: File | null): Promise<void> {
-    if (!state || !file) {
+    if (!file) {
       return;
     }
 
@@ -190,21 +170,28 @@ export function App() {
 
     try {
       const dataUrl = await readFileAsDataUrl(file);
+      const current = stateRef.current;
+      if (!current) {
+        return;
+      }
 
       const settings = {
-        ...state.settings,
+        ...current.settings,
         backgroundImageName: file.name,
         backgroundImageMimeType: file.type,
         backgroundImageSizeBytes: file.size,
       };
+      const nextState = { ...current, settings, backgroundImageDataUrl: dataUrl };
 
-      await Promise.all([
-        setBackgroundImageDataUrl(dataUrl),
-        chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings }),
-      ]);
-      await chrome.runtime.sendMessage({ type: "worker/refresh-active-tab" });
+      syncState(nextState);
 
-      setState((current) => (current ? { ...current, settings, backgroundImageDataUrl: dataUrl } : current));
+      await queueSettingsWrite(async () => {
+        await chrome.storage.local.set({
+          [STORAGE_KEYS.backgroundImageDataUrl]: dataUrl,
+          [STORAGE_KEYS.settings]: settings,
+        });
+      });
+
       setStatus({ message: "Background image saved.", tone: "positive" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not save the background image.";
@@ -215,51 +202,59 @@ export function App() {
   }
 
   async function removeBackgroundImage(): Promise<void> {
-    if (!state) {
+    const current = stateRef.current;
+    if (!current) {
       return;
     }
 
     const settings = {
-      ...state.settings,
+      ...current.settings,
     };
     delete settings.backgroundImageName;
     delete settings.backgroundImageMimeType;
     delete settings.backgroundImageSizeBytes;
+    const nextState = { ...current, settings, backgroundImageDataUrl: null };
 
-    await Promise.all([
-      removeBackgroundImageDataUrl(),
-      chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings }),
-    ]);
-    await chrome.runtime.sendMessage({ type: "worker/refresh-active-tab" });
+    syncState(nextState);
 
-    setState((current) => (current ? { ...current, settings, backgroundImageDataUrl: null } : current));
+    await queueSettingsWrite(async () => {
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.backgroundImageDataUrl]: null,
+        [STORAGE_KEYS.settings]: settings,
+      });
+    });
+
     setStatus({ message: "Background image removed.", tone: "neutral" });
   }
 
-  async function updateSettings(patch: Partial<GlobalSettings>, statusText: string): Promise<void> {
-    if (!state) {
+  async function updateSettings(patch: Partial<GlobalSettings>, statusText?: string): Promise<void> {
+    const current = stateRef.current;
+    if (!current) {
       return;
     }
 
     const settings = {
-      ...state.settings,
+      ...current.settings,
       ...patch,
     };
 
-    await chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings });
+    syncState({ ...current, settings });
 
-    if (patch.autoUpdate !== undefined) {
-      await chrome.runtime.sendMessage({ type: "worker/update-auto-update", enabled: patch.autoUpdate });
-    }
+    await queueSettingsWrite(async () => {
+      await chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings });
 
-    await chrome.runtime.sendMessage({ type: "worker/refresh-active-tab" });
-    setState((current) => (current ? { ...current, settings } : current));
-    setStatus({ message: statusText, tone: "positive" });
+      if (statusText) {
+        setStatus({ message: statusText, tone: "positive" });
+      }
+    });
   }
 
   async function resetRepository(): Promise<void> {
     await setRepositoryUrl(DEFAULT_REPOSITORY_URL);
-    setState((current) => (current ? { ...current, repositoryUrl: DEFAULT_REPOSITORY_URL } : current));
+    const current = stateRef.current;
+    if (current) {
+      syncState({ ...current, repositoryUrl: DEFAULT_REPOSITORY_URL });
+    }
     setStatus({ message: "Repository source reset to default.", tone: "neutral" });
   }
 
@@ -271,7 +266,7 @@ export function App() {
 
     if (response.ok) {
       const nextState = await loadState();
-      setState(nextState);
+      syncState(nextState);
       setStatus({ message: "Styles refreshed from the repository.", tone: "positive" });
       return;
     }
@@ -287,6 +282,7 @@ export function App() {
   const repositorySource = state.repositoryUrl.trim() || DEFAULT_REPOSITORY_URL;
   const backgroundImageFileSize = formatFileSize(state.settings.backgroundImageSizeBytes);
   const hasBackgroundImage = Boolean(state.backgroundImageDataUrl && state.settings.backgroundImageName);
+  const backgroundImagePresentation = getBackgroundImagePresentation(state.settings.backgroundImageMode);
   const previewImageBlurPx = normalizeBackgroundImageBlurPx(state.settings.backgroundImageBlurPx);
   const previewImageTintOpacity = normalizeBackgroundImageTintOpacity(state.settings.backgroundImageTintOpacity);
   const previewImageScale = getBackgroundImageScaleForBlur(previewImageBlurPx);
@@ -344,17 +340,9 @@ export function App() {
               style={{
                 ["--preview-color" as string]: state.settings.backgroundColor,
                 ["--preview-image" as string]: hasBackgroundImage ? `url("${state.backgroundImageDataUrl}")` : "none",
-                ["--preview-size" as string]: state.settings.backgroundImageMode === "stretch"
-                  ? "100% 100%"
-                  : state.settings.backgroundImageMode === "tile"
-                    ? "auto"
-                    : state.settings.backgroundImageMode === "fit"
-                      ? "contain"
-                      : state.settings.backgroundImageMode === "center"
-                        ? "auto"
-                        : "cover",
-                ["--preview-repeat" as string]: state.settings.backgroundImageMode === "tile" ? "repeat" : "no-repeat",
-                ["--preview-position" as string]: state.settings.backgroundImageMode === "tile" ? "0 0" : "center center",
+                ["--preview-size" as string]: backgroundImagePresentation.size,
+                ["--preview-repeat" as string]: backgroundImagePresentation.repeat,
+                ["--preview-position" as string]: backgroundImagePresentation.position,
                 ["--preview-blur" as string]: `${previewImageBlurPx}px`,
                 ["--preview-scale" as string]: `${previewImageScale}`,
                 ["--preview-tint" as string]: previewTintColor,
@@ -369,9 +357,8 @@ export function App() {
                 type="color"
                 value={state.settings.backgroundColor}
                 aria-label="Background color"
-                onChange={(event) => setState({ ...state, settings: { ...state.settings, backgroundColor: event.target.value } })}
+                onChange={(event) => void updateSettings({ backgroundColor: event.target.value })}
               />
-              <button onClick={() => void saveBackgroundColor()}>Save background</button>
             </div>
             <div className="image-controls">
               <label className="image-upload-field">
@@ -392,7 +379,7 @@ export function App() {
                 <select
                   value={state.settings.backgroundImageMode}
                   disabled={!hasBackgroundImage}
-                  onChange={(event) => void saveBackgroundMode(event.target.value as BackgroundImageMode)}
+                  onChange={(event) => void updateSettings({ backgroundImageMode: event.target.value as BackgroundImageMode })}
                 >
                   {(["fill", "fit", "center", "stretch", "tile"] as BackgroundImageMode[]).map((mode) => (
                     <option key={mode} value={mode}>{getModeLabel(mode)}</option>
@@ -409,13 +396,11 @@ export function App() {
                     step="1"
                     value={state.settings.backgroundImageTintOpacity}
                     disabled={!hasBackgroundImage}
-                    onChange={(event) => setState({
-                      ...state,
-                      settings: {
-                        ...state.settings,
-                        backgroundImageTintOpacity: Number.parseInt(event.target.value, 10),
+                    onChange={(event) => void updateSettings(
+                      {
+                        backgroundImageTintOpacity: normalizeBackgroundImageTintOpacity(Number.parseInt(event.target.value, 10)),
                       },
-                    })}
+                    )}
                   />
                 </label>
                 <label className="image-slider-field">
@@ -427,20 +412,15 @@ export function App() {
                     step="1"
                     value={state.settings.backgroundImageBlurPx}
                     disabled={!hasBackgroundImage}
-                    onChange={(event) => setState({
-                      ...state,
-                      settings: {
-                        ...state.settings,
-                        backgroundImageBlurPx: Number.parseInt(event.target.value, 10),
+                    onChange={(event) => void updateSettings(
+                      {
+                        backgroundImageBlurPx: normalizeBackgroundImageBlurPx(Number.parseInt(event.target.value, 10)),
                       },
-                    })}
+                    )}
                   />
                 </label>
               </div>
               <div className="image-actions">
-                <button disabled={!hasBackgroundImage} onClick={() => void saveBackgroundImageEffects()}>
-                  Save image effects
-                </button>
                 <button className="secondary" disabled={!hasBackgroundImage} onClick={() => void removeBackgroundImage()}>
                   Remove image
                 </button>
@@ -462,7 +442,7 @@ export function App() {
               <span>Repository URL</span>
               <input
                 value={state.repositoryUrl}
-                onChange={(event) => setState({ ...state, repositoryUrl: event.target.value })}
+                onChange={(event) => syncState({ ...state, repositoryUrl: event.target.value })}
                 placeholder={DEFAULT_REPOSITORY_URL}
               />
             </label>

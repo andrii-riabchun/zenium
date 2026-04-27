@@ -48,14 +48,6 @@ export async function getBackgroundImageDataUrl(): Promise<string | null> {
   return typeof value === "string" && value ? value : null;
 }
 
-export async function setBackgroundImageDataUrl(dataUrl: string): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEYS.backgroundImageDataUrl]: dataUrl });
-}
-
-export async function removeBackgroundImageDataUrl(): Promise<void> {
-  await chrome.storage.local.remove(STORAGE_KEYS.backgroundImageDataUrl);
-}
-
 export async function setGlobalSettings(settings: GlobalSettings): Promise<void> {
   await chrome.storage.local.set({ [STORAGE_KEYS.settings]: settings });
 }

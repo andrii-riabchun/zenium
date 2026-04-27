@@ -56,8 +56,7 @@ export interface StyleDecision {
 export type RuntimeRequest =
   | { type: "content/ready" }
   | { type: "worker/refetch-styles" }
-  | { type: "worker/refresh-active-tab" }
-  | { type: "worker/update-auto-update"; enabled: boolean };
+  | { type: "worker/refresh-active-tab" };
 
 export type RuntimeResponse =
   | { ok: true }
