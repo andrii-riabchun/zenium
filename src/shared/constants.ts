@@ -24,6 +24,7 @@ export const DEFAULT_SETTINGS: GlobalSettings = {
 
 export const MAX_BACKGROUND_IMAGE_TINT_OPACITY = 100;
 export const MAX_BACKGROUND_IMAGE_BLUR_PX = 24;
+export const DEFAULT_BACKGROUND_IMAGE_EFFECT_LEVEL = 12;
 
 export const ICONS = {
   on: {

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import {
+  DEFAULT_BACKGROUND_IMAGE_EFFECT_LEVEL,
   DEFAULT_REPOSITORY_URL,
   DEFAULT_SETTINGS,
   MAX_BACKGROUND_IMAGE_BLUR_PX,
@@ -29,11 +30,51 @@ interface OptionsState {
   backgroundImageDataUrl: string | null;
 }
 
+interface AppearanceDraft {
+  backgroundColor: string;
+  backgroundImageMode: BackgroundImageMode;
+  backgroundImageTintOpacity: number;
+  backgroundImageBlurPx: number;
+  backgroundImageDataUrl: string | null;
+  backgroundImageName?: string;
+  backgroundImageMimeType?: string;
+  backgroundImageSizeBytes?: number;
+}
+
 type OptionsNoticeTone = "neutral" | "positive" | "warning";
 
 interface OptionsNotice {
   message: string;
   tone: OptionsNoticeTone;
+}
+
+const OPTIONS_BACKGROUND_PREVIEW_STYLE_ID = "zenium-options-background-preview";
+const TINT_SLIDER_STEP_COUNT = MAX_BACKGROUND_IMAGE_BLUR_PX;
+
+function getTintSliderValue(opacityPercent: number): number {
+  return Math.round((normalizeBackgroundImageTintOpacity(opacityPercent) / MAX_BACKGROUND_IMAGE_TINT_OPACITY) * TINT_SLIDER_STEP_COUNT);
+}
+
+function getTintOpacityFromSliderValue(sliderValue: number): number {
+  return Math.round((Math.min(TINT_SLIDER_STEP_COUNT, Math.max(0, sliderValue)) / TINT_SLIDER_STEP_COUNT) * MAX_BACKGROUND_IMAGE_TINT_OPACITY);
+}
+
+function getOptionsBackgroundPreviewStyleElement(): HTMLStyleElement {
+  let styleElement = document.getElementById(OPTIONS_BACKGROUND_PREVIEW_STYLE_ID) as HTMLStyleElement | null;
+  if (!styleElement) {
+    styleElement = document.createElement("style");
+    styleElement.id = OPTIONS_BACKGROUND_PREVIEW_STYLE_ID;
+  }
+  return styleElement;
+}
+
+function attachOptionsBackgroundPreviewStyleElement(): HTMLStyleElement {
+  const target = document.head ?? document.documentElement;
+  const styleElement = getOptionsBackgroundPreviewStyleElement();
+  if (target.lastChild !== styleElement) {
+    target.appendChild(styleElement);
+  }
+  return styleElement;
 }
 
 async function loadState(): Promise<OptionsState> {
@@ -70,6 +111,62 @@ function formatFileSize(size?: number): string | null {
   return `${size} B`;
 }
 
+function createAppearanceDraft(state: OptionsState): AppearanceDraft {
+  return {
+    backgroundColor: state.settings.backgroundColor,
+    backgroundImageMode: state.settings.backgroundImageMode,
+    backgroundImageTintOpacity: state.settings.backgroundImageTintOpacity,
+    backgroundImageBlurPx: state.settings.backgroundImageBlurPx,
+    backgroundImageDataUrl: state.backgroundImageDataUrl,
+    backgroundImageName: state.settings.backgroundImageName,
+    backgroundImageMimeType: state.settings.backgroundImageMimeType,
+    backgroundImageSizeBytes: state.settings.backgroundImageSizeBytes,
+  };
+}
+
+function hasDraftBackgroundImage(draft: AppearanceDraft | null): boolean {
+  return Boolean(draft?.backgroundImageDataUrl && draft.backgroundImageName);
+}
+
+function isAppearanceDraftDirty(state: OptionsState, draft: AppearanceDraft | null): boolean {
+  if (!draft) {
+    return false;
+  }
+
+  return (
+    draft.backgroundColor !== state.settings.backgroundColor ||
+    draft.backgroundImageMode !== state.settings.backgroundImageMode ||
+    normalizeBackgroundImageTintOpacity(draft.backgroundImageTintOpacity) !== state.settings.backgroundImageTintOpacity ||
+    normalizeBackgroundImageBlurPx(draft.backgroundImageBlurPx) !== state.settings.backgroundImageBlurPx ||
+    draft.backgroundImageDataUrl !== state.backgroundImageDataUrl ||
+    (draft.backgroundImageName ?? undefined) !== (state.settings.backgroundImageName ?? undefined) ||
+    (draft.backgroundImageMimeType ?? undefined) !== (state.settings.backgroundImageMimeType ?? undefined) ||
+    (draft.backgroundImageSizeBytes ?? undefined) !== (state.settings.backgroundImageSizeBytes ?? undefined)
+  );
+}
+
+function applyAppearanceDraft(settings: GlobalSettings, draft: AppearanceDraft): GlobalSettings {
+  const nextSettings: GlobalSettings = {
+    ...settings,
+    backgroundColor: draft.backgroundColor,
+    backgroundImageMode: draft.backgroundImageMode,
+    backgroundImageTintOpacity: normalizeBackgroundImageTintOpacity(draft.backgroundImageTintOpacity),
+    backgroundImageBlurPx: normalizeBackgroundImageBlurPx(draft.backgroundImageBlurPx),
+  };
+
+  if (hasDraftBackgroundImage(draft)) {
+    nextSettings.backgroundImageName = draft.backgroundImageName;
+    nextSettings.backgroundImageMimeType = draft.backgroundImageMimeType;
+    nextSettings.backgroundImageSizeBytes = draft.backgroundImageSizeBytes;
+    return nextSettings;
+  }
+
+  delete nextSettings.backgroundImageName;
+  delete nextSettings.backgroundImageMimeType;
+  delete nextSettings.backgroundImageSizeBytes;
+  return nextSettings;
+}
+
 function getModeLabel(mode: BackgroundImageMode): string {
   switch (mode) {
     case "stretch":
@@ -104,15 +201,13 @@ async function readFileAsDataUrl(file: File): Promise<string> {
 
 export function App() {
   const [state, setState] = useState<OptionsState | null>(null);
+  const [appearanceDraft, setAppearanceDraft] = useState<AppearanceDraft | null>(null);
   const [status, setStatus] = useState<OptionsNotice | null>({
     message: "Loading settings...",
     tone: "neutral",
   });
   const [isRefetching, setIsRefetching] = useState(false);
   const [isSavingBackgroundImage, setIsSavingBackgroundImage] = useState(false);
-  const [draftBackgroundColor, setDraftBackgroundColor] = useState(DEFAULT_SETTINGS.backgroundColor);
-  const [draftBackgroundImageTintOpacity, setDraftBackgroundImageTintOpacity] = useState(DEFAULT_SETTINGS.backgroundImageTintOpacity);
-  const [draftBackgroundImageBlurPx, setDraftBackgroundImageBlurPx] = useState(DEFAULT_SETTINGS.backgroundImageBlurPx);
   const stateRef = useRef<OptionsState | null>(null);
   const settingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -133,6 +228,7 @@ export function App() {
     void loadState().then((nextState) => {
       if (!cancelled) {
         syncState(nextState);
+        setAppearanceDraft(createAppearanceDraft(nextState));
         setStatus(null);
       }
     });
@@ -143,24 +239,45 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const backgroundColor = state?.settings.backgroundColor ?? DEFAULT_SETTINGS.backgroundColor;
     const rootStyle = document.documentElement.style;
-    rootStyle.setProperty("--options-background-color", backgroundColor);
-    rootStyle.colorScheme = getColorSchemeForBackground(backgroundColor);
-  }, [state?.settings.backgroundColor]);
+    const previewColor = appearanceDraft?.backgroundColor ?? DEFAULT_SETTINGS.backgroundColor;
+    const previewImageBlurPx = appearanceDraft
+      ? normalizeBackgroundImageBlurPx(appearanceDraft.backgroundImageBlurPx)
+      : normalizeBackgroundImageBlurPx(DEFAULT_SETTINGS.backgroundImageBlurPx);
+    const previewImageTintOpacity = appearanceDraft
+      ? normalizeBackgroundImageTintOpacity(appearanceDraft.backgroundImageTintOpacity)
+      : normalizeBackgroundImageTintOpacity(DEFAULT_SETTINGS.backgroundImageTintOpacity);
+    const previewImageScale = getBackgroundImageScaleForBlur(previewImageBlurPx);
+    const backgroundImagePresentation = getBackgroundImagePresentation(appearanceDraft?.backgroundImageMode ?? DEFAULT_SETTINGS.backgroundImageMode);
+    const hasBackgroundImage = hasDraftBackgroundImage(appearanceDraft);
+    const backgroundPreviewStyleElement = attachOptionsBackgroundPreviewStyleElement();
 
-  useEffect(() => {
-    if (!state) {
+    rootStyle.setProperty("--options-background-color", previewColor);
+    rootStyle.colorScheme = getColorSchemeForBackground(previewColor);
+    rootStyle.setProperty("--options-preview-tint", getCssColorWithOpacity(previewColor, previewImageTintOpacity));
+
+    if (!hasBackgroundImage || !appearanceDraft?.backgroundImageDataUrl) {
+      backgroundPreviewStyleElement.textContent = "";
       return;
     }
 
-    setDraftBackgroundColor(state.settings.backgroundColor);
-    setDraftBackgroundImageTintOpacity(state.settings.backgroundImageTintOpacity);
-    setDraftBackgroundImageBlurPx(state.settings.backgroundImageBlurPx);
+    backgroundPreviewStyleElement.textContent = [
+      "body::before {",
+      `  background-image: url(\"${appearanceDraft.backgroundImageDataUrl}\");`,
+      `  background-position: ${backgroundImagePresentation.position};`,
+      `  background-repeat: ${backgroundImagePresentation.repeat};`,
+      `  background-size: ${backgroundImagePresentation.size};`,
+      `  filter: blur(${previewImageBlurPx}px);`,
+      `  transform: scale(${previewImageScale});`,
+      "}",
+    ].join("\n");
   }, [
-    state?.settings.backgroundColor,
-    state?.settings.backgroundImageBlurPx,
-    state?.settings.backgroundImageTintOpacity,
+    appearanceDraft?.backgroundColor,
+    appearanceDraft?.backgroundImageBlurPx,
+    appearanceDraft?.backgroundImageDataUrl,
+    appearanceDraft?.backgroundImageMode,
+    appearanceDraft?.backgroundImageName,
+    appearanceDraft?.backgroundImageTintOpacity,
   ]);
 
   async function saveRepositoryUrl(): Promise<void> {
@@ -173,18 +290,29 @@ export function App() {
     setStatus({ message: "Repository source saved.", tone: "positive" });
   }
 
-  async function saveBackgroundColor(): Promise<void> {
-    await updateSettings({ backgroundColor: draftBackgroundColor }, "Background color saved.");
-  }
+  async function saveAppearance(): Promise<void> {
+    const current = stateRef.current;
+    if (!current || !appearanceDraft) {
+      return;
+    }
 
-  async function saveBackgroundImageEffects(): Promise<void> {
-    await updateSettings(
-      {
-        backgroundImageTintOpacity: normalizeBackgroundImageTintOpacity(draftBackgroundImageTintOpacity),
-        backgroundImageBlurPx: normalizeBackgroundImageBlurPx(draftBackgroundImageBlurPx),
-      },
-      "Background image effects saved.",
-    );
+    const settings = applyAppearanceDraft(current.settings, appearanceDraft);
+    const nextState = {
+      ...current,
+      settings,
+      backgroundImageDataUrl: appearanceDraft.backgroundImageDataUrl,
+    };
+
+    syncState(nextState);
+    setAppearanceDraft(createAppearanceDraft(nextState));
+
+    await queueSettingsWrite(async () => {
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.settings]: settings,
+        [STORAGE_KEYS.backgroundImageDataUrl]: appearanceDraft.backgroundImageDataUrl,
+      });
+      setStatus({ message: "Appearance saved.", tone: "positive" });
+    });
   }
 
   async function uploadBackgroundImage(file: File | null): Promise<void> {
@@ -201,29 +329,22 @@ export function App() {
 
     try {
       const dataUrl = await readFileAsDataUrl(file);
-      const current = stateRef.current;
-      if (!current) {
-        return;
-      }
+      setAppearanceDraft((currentDraft) => {
+        if (!currentDraft) {
+          return currentDraft;
+        }
 
-      const settings = {
-        ...current.settings,
-        backgroundImageName: file.name,
-        backgroundImageMimeType: file.type,
-        backgroundImageSizeBytes: file.size,
-      };
-      const nextState = { ...current, settings, backgroundImageDataUrl: dataUrl };
-
-      syncState(nextState);
-
-      await queueSettingsWrite(async () => {
-        await chrome.storage.local.set({
-          [STORAGE_KEYS.backgroundImageDataUrl]: dataUrl,
-          [STORAGE_KEYS.settings]: settings,
-        });
+        return {
+          ...currentDraft,
+          backgroundImageDataUrl: dataUrl,
+          backgroundImageName: file.name,
+          backgroundImageMimeType: file.type,
+          backgroundImageSizeBytes: file.size,
+          backgroundImageTintOpacity: getTintOpacityFromSliderValue(DEFAULT_BACKGROUND_IMAGE_EFFECT_LEVEL),
+          backgroundImageBlurPx: DEFAULT_BACKGROUND_IMAGE_EFFECT_LEVEL,
+        };
       });
-
-      setStatus({ message: "Background image saved.", tone: "positive" });
+      setStatus({ message: "Background image ready to save.", tone: "neutral" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not save the background image.";
       setStatus({ message, tone: "warning" });
@@ -233,29 +354,20 @@ export function App() {
   }
 
   async function removeBackgroundImage(): Promise<void> {
-    const current = stateRef.current;
-    if (!current) {
-      return;
-    }
+    setAppearanceDraft((currentDraft) => {
+      if (!currentDraft) {
+        return currentDraft;
+      }
 
-    const settings = {
-      ...current.settings,
-    };
-    delete settings.backgroundImageName;
-    delete settings.backgroundImageMimeType;
-    delete settings.backgroundImageSizeBytes;
-    const nextState = { ...current, settings, backgroundImageDataUrl: null };
-
-    syncState(nextState);
-
-    await queueSettingsWrite(async () => {
-      await chrome.storage.local.set({
-        [STORAGE_KEYS.backgroundImageDataUrl]: null,
-        [STORAGE_KEYS.settings]: settings,
-      });
+      return {
+        ...currentDraft,
+        backgroundImageDataUrl: null,
+        backgroundImageName: undefined,
+        backgroundImageMimeType: undefined,
+        backgroundImageSizeBytes: undefined,
+      };
     });
-
-    setStatus({ message: "Background image removed.", tone: "neutral" });
+    setStatus({ message: "Background image removal ready to save.", tone: "neutral" });
   }
 
   async function updateSettings(patch: Partial<GlobalSettings>, statusText?: string): Promise<void> {
@@ -305,23 +417,17 @@ export function App() {
     setStatus({ message: response.error, tone: "warning" });
   }
 
-  if (!state) {
+  if (!state || !appearanceDraft) {
     return <main className="options-root">Loading...</main>;
   }
 
   const lastFetchedTime = formatLastFetchedTime(state.settings.lastFetchedTime);
   const repositorySource = state.repositoryUrl.trim() || DEFAULT_REPOSITORY_URL;
-  const backgroundImageFileSize = formatFileSize(state.settings.backgroundImageSizeBytes);
-  const hasBackgroundImage = Boolean(state.backgroundImageDataUrl && state.settings.backgroundImageName);
-  const backgroundImagePresentation = getBackgroundImagePresentation(state.settings.backgroundImageMode);
-  const isBackgroundColorDirty = draftBackgroundColor !== state.settings.backgroundColor;
-  const previewImageBlurPx = normalizeBackgroundImageBlurPx(draftBackgroundImageBlurPx);
-  const previewImageTintOpacity = normalizeBackgroundImageTintOpacity(draftBackgroundImageTintOpacity);
-  const previewImageScale = getBackgroundImageScaleForBlur(previewImageBlurPx);
-  const previewTintColor = getCssColorWithOpacity(draftBackgroundColor, previewImageTintOpacity);
-  const areBackgroundImageEffectsDirty =
-    previewImageBlurPx !== state.settings.backgroundImageBlurPx ||
-    previewImageTintOpacity !== state.settings.backgroundImageTintOpacity;
+  const hasBackgroundImage = hasDraftBackgroundImage(appearanceDraft);
+  const isAppearanceDirty = isAppearanceDraftDirty(state, appearanceDraft);
+  const backgroundImageMeta = [appearanceDraft.backgroundImageName, formatFileSize(appearanceDraft.backgroundImageSizeBytes)]
+    .filter((value): value is string => Boolean(value))
+    .join(" • ");
 
   return (
     <main className="options-root">
@@ -370,52 +476,45 @@ export function App() {
             <p>Transparent shells fall back to this background. Uploaded images sit over the solid color so uncovered areas still render cleanly.</p>
           </div>
           <div className="palette-panel">
-            <div
-              className="color-preview"
-              style={{
-                ["--preview-color" as string]: draftBackgroundColor,
-                ["--preview-image" as string]: hasBackgroundImage ? `url("${state.backgroundImageDataUrl}")` : "none",
-                ["--preview-size" as string]: backgroundImagePresentation.size,
-                ["--preview-repeat" as string]: backgroundImagePresentation.repeat,
-                ["--preview-position" as string]: backgroundImagePresentation.position,
-                ["--preview-blur" as string]: `${previewImageBlurPx}px`,
-                ["--preview-scale" as string]: `${previewImageScale}`,
-                ["--preview-tint" as string]: previewTintColor,
-              }}
-            >
-              <span>Canvas</span>
-              <strong>{hasBackgroundImage ? state.settings.backgroundImageName : state.settings.backgroundColor}</strong>
-              {backgroundImageFileSize ? <small>{backgroundImageFileSize}</small> : null}
-            </div>
             <div className="palette-controls">
-              <input
-                type="color"
-                value={draftBackgroundColor}
-                aria-label="Background color"
-                onChange={(event) => setDraftBackgroundColor(event.target.value)}
-              />
-              <button disabled={!isBackgroundColorDirty} onClick={() => void saveBackgroundColor()}>Save background</button>
+              <label className="image-color-field">
+                <span>Background color</span>
+                <input
+                  type="color"
+                  value={appearanceDraft.backgroundColor}
+                  aria-label="Background color"
+                  onChange={(event) => setAppearanceDraft({ ...appearanceDraft, backgroundColor: event.target.value })}
+                />
+              </label>
             </div>
             <div className="image-controls">
               <label className="image-upload-field">
                 <span>Background image</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  disabled={isSavingBackgroundImage}
-                  onChange={(event) => {
-                    const [file] = Array.from(event.target.files ?? []);
-                    void uploadBackgroundImage(file ?? null);
-                    event.target.value = "";
-                  }}
-                />
+                <div className="image-upload-control">
+                  <span className={`image-upload-button${isSavingBackgroundImage ? " disabled" : ""}`}>Upload image</span>
+                  {backgroundImageMeta ? <span className="image-upload-meta">{backgroundImageMeta}</span> : null}
+                  <input
+                    className="image-upload-input"
+                    type="file"
+                    accept="image/*"
+                    disabled={isSavingBackgroundImage}
+                    onChange={(event) => {
+                      const [file] = Array.from(event.target.files ?? []);
+                      void uploadBackgroundImage(file ?? null);
+                      event.target.value = "";
+                    }}
+                  />
+                </div>
               </label>
               <label className="image-mode-field">
                 <span>Image mode</span>
                 <select
-                  value={state.settings.backgroundImageMode}
+                  value={appearanceDraft.backgroundImageMode}
                   disabled={!hasBackgroundImage}
-                  onChange={(event) => void updateSettings({ backgroundImageMode: event.target.value as BackgroundImageMode })}
+                  onChange={(event) => setAppearanceDraft({
+                    ...appearanceDraft,
+                    backgroundImageMode: event.target.value as BackgroundImageMode,
+                  })}
                 >
                   {(["fill", "fit", "center", "stretch", "tile"] as BackgroundImageMode[]).map((mode) => (
                     <option key={mode} value={mode}>{getModeLabel(mode)}</option>
@@ -428,11 +527,14 @@ export function App() {
                   <input
                     type="range"
                     min="0"
-                    max={`${MAX_BACKGROUND_IMAGE_TINT_OPACITY}`}
+                    max={`${TINT_SLIDER_STEP_COUNT}`}
                     step="1"
-                    value={draftBackgroundImageTintOpacity}
+                    value={getTintSliderValue(appearanceDraft.backgroundImageTintOpacity)}
                     disabled={!hasBackgroundImage}
-                    onChange={(event) => setDraftBackgroundImageTintOpacity(normalizeBackgroundImageTintOpacity(Number.parseInt(event.target.value, 10)))}
+                    onChange={(event) => setAppearanceDraft({
+                      ...appearanceDraft,
+                      backgroundImageTintOpacity: getTintOpacityFromSliderValue(Number.parseInt(event.target.value, 10)),
+                    })}
                   />
                 </label>
                 <label className="image-slider-field">
@@ -442,15 +544,18 @@ export function App() {
                     min="0"
                     max={`${MAX_BACKGROUND_IMAGE_BLUR_PX}`}
                     step="1"
-                    value={draftBackgroundImageBlurPx}
+                    value={appearanceDraft.backgroundImageBlurPx}
                     disabled={!hasBackgroundImage}
-                    onChange={(event) => setDraftBackgroundImageBlurPx(normalizeBackgroundImageBlurPx(Number.parseInt(event.target.value, 10)))}
+                    onChange={(event) => setAppearanceDraft({
+                      ...appearanceDraft,
+                      backgroundImageBlurPx: normalizeBackgroundImageBlurPx(Number.parseInt(event.target.value, 10)),
+                    })}
                   />
                 </label>
               </div>
               <div className="image-actions">
-                <button disabled={!hasBackgroundImage || !areBackgroundImageEffectsDirty} onClick={() => void saveBackgroundImageEffects()}>
-                  Save image effects
+                <button disabled={!isAppearanceDirty || isSavingBackgroundImage} onClick={() => void saveAppearance()}>
+                  Save
                 </button>
                 <button className="secondary" disabled={!hasBackgroundImage} onClick={() => void removeBackgroundImage()}>
                   Remove image
