@@ -110,6 +110,9 @@ export function App() {
   });
   const [isRefetching, setIsRefetching] = useState(false);
   const [isSavingBackgroundImage, setIsSavingBackgroundImage] = useState(false);
+  const [draftBackgroundColor, setDraftBackgroundColor] = useState(DEFAULT_SETTINGS.backgroundColor);
+  const [draftBackgroundImageTintOpacity, setDraftBackgroundImageTintOpacity] = useState(DEFAULT_SETTINGS.backgroundImageTintOpacity);
+  const [draftBackgroundImageBlurPx, setDraftBackgroundImageBlurPx] = useState(DEFAULT_SETTINGS.backgroundImageBlurPx);
   const stateRef = useRef<OptionsState | null>(null);
   const settingsSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
@@ -146,6 +149,20 @@ export function App() {
     rootStyle.colorScheme = getColorSchemeForBackground(backgroundColor);
   }, [state?.settings.backgroundColor]);
 
+  useEffect(() => {
+    if (!state) {
+      return;
+    }
+
+    setDraftBackgroundColor(state.settings.backgroundColor);
+    setDraftBackgroundImageTintOpacity(state.settings.backgroundImageTintOpacity);
+    setDraftBackgroundImageBlurPx(state.settings.backgroundImageBlurPx);
+  }, [
+    state?.settings.backgroundColor,
+    state?.settings.backgroundImageBlurPx,
+    state?.settings.backgroundImageTintOpacity,
+  ]);
+
   async function saveRepositoryUrl(): Promise<void> {
     const current = stateRef.current;
     if (!current) {
@@ -154,6 +171,20 @@ export function App() {
 
     await setRepositoryUrl(current.repositoryUrl.trim() || DEFAULT_REPOSITORY_URL);
     setStatus({ message: "Repository source saved.", tone: "positive" });
+  }
+
+  async function saveBackgroundColor(): Promise<void> {
+    await updateSettings({ backgroundColor: draftBackgroundColor }, "Background color saved.");
+  }
+
+  async function saveBackgroundImageEffects(): Promise<void> {
+    await updateSettings(
+      {
+        backgroundImageTintOpacity: normalizeBackgroundImageTintOpacity(draftBackgroundImageTintOpacity),
+        backgroundImageBlurPx: normalizeBackgroundImageBlurPx(draftBackgroundImageBlurPx),
+      },
+      "Background image effects saved.",
+    );
   }
 
   async function uploadBackgroundImage(file: File | null): Promise<void> {
@@ -283,10 +314,14 @@ export function App() {
   const backgroundImageFileSize = formatFileSize(state.settings.backgroundImageSizeBytes);
   const hasBackgroundImage = Boolean(state.backgroundImageDataUrl && state.settings.backgroundImageName);
   const backgroundImagePresentation = getBackgroundImagePresentation(state.settings.backgroundImageMode);
-  const previewImageBlurPx = normalizeBackgroundImageBlurPx(state.settings.backgroundImageBlurPx);
-  const previewImageTintOpacity = normalizeBackgroundImageTintOpacity(state.settings.backgroundImageTintOpacity);
+  const isBackgroundColorDirty = draftBackgroundColor !== state.settings.backgroundColor;
+  const previewImageBlurPx = normalizeBackgroundImageBlurPx(draftBackgroundImageBlurPx);
+  const previewImageTintOpacity = normalizeBackgroundImageTintOpacity(draftBackgroundImageTintOpacity);
   const previewImageScale = getBackgroundImageScaleForBlur(previewImageBlurPx);
-  const previewTintColor = getCssColorWithOpacity(state.settings.backgroundColor, previewImageTintOpacity);
+  const previewTintColor = getCssColorWithOpacity(draftBackgroundColor, previewImageTintOpacity);
+  const areBackgroundImageEffectsDirty =
+    previewImageBlurPx !== state.settings.backgroundImageBlurPx ||
+    previewImageTintOpacity !== state.settings.backgroundImageTintOpacity;
 
   return (
     <main className="options-root">
@@ -338,7 +373,7 @@ export function App() {
             <div
               className="color-preview"
               style={{
-                ["--preview-color" as string]: state.settings.backgroundColor,
+                ["--preview-color" as string]: draftBackgroundColor,
                 ["--preview-image" as string]: hasBackgroundImage ? `url("${state.backgroundImageDataUrl}")` : "none",
                 ["--preview-size" as string]: backgroundImagePresentation.size,
                 ["--preview-repeat" as string]: backgroundImagePresentation.repeat,
@@ -355,10 +390,11 @@ export function App() {
             <div className="palette-controls">
               <input
                 type="color"
-                value={state.settings.backgroundColor}
+                value={draftBackgroundColor}
                 aria-label="Background color"
-                onChange={(event) => void updateSettings({ backgroundColor: event.target.value })}
+                onChange={(event) => setDraftBackgroundColor(event.target.value)}
               />
+              <button disabled={!isBackgroundColorDirty} onClick={() => void saveBackgroundColor()}>Save background</button>
             </div>
             <div className="image-controls">
               <label className="image-upload-field">
@@ -394,13 +430,9 @@ export function App() {
                     min="0"
                     max={`${MAX_BACKGROUND_IMAGE_TINT_OPACITY}`}
                     step="1"
-                    value={state.settings.backgroundImageTintOpacity}
+                    value={draftBackgroundImageTintOpacity}
                     disabled={!hasBackgroundImage}
-                    onChange={(event) => void updateSettings(
-                      {
-                        backgroundImageTintOpacity: normalizeBackgroundImageTintOpacity(Number.parseInt(event.target.value, 10)),
-                      },
-                    )}
+                    onChange={(event) => setDraftBackgroundImageTintOpacity(normalizeBackgroundImageTintOpacity(Number.parseInt(event.target.value, 10)))}
                   />
                 </label>
                 <label className="image-slider-field">
@@ -410,17 +442,16 @@ export function App() {
                     min="0"
                     max={`${MAX_BACKGROUND_IMAGE_BLUR_PX}`}
                     step="1"
-                    value={state.settings.backgroundImageBlurPx}
+                    value={draftBackgroundImageBlurPx}
                     disabled={!hasBackgroundImage}
-                    onChange={(event) => void updateSettings(
-                      {
-                        backgroundImageBlurPx: normalizeBackgroundImageBlurPx(Number.parseInt(event.target.value, 10)),
-                      },
-                    )}
+                    onChange={(event) => setDraftBackgroundImageBlurPx(normalizeBackgroundImageBlurPx(Number.parseInt(event.target.value, 10)))}
                   />
                 </label>
               </div>
               <div className="image-actions">
+                <button disabled={!hasBackgroundImage || !areBackgroundImageEffectsDirty} onClick={() => void saveBackgroundImageEffects()}>
+                  Save image effects
+                </button>
                 <button className="secondary" disabled={!hasBackgroundImage} onClick={() => void removeBackgroundImage()}>
                   Remove image
                 </button>
